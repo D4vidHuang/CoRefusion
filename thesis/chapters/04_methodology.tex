@@ -1,0 +1,204 @@
+\chapter{Methodology}
+
+This chapter presents the proposed approach for diffusion LLM-based code refactoring localization, including the overall architecture, model design, and training procedure.
+
+\section{Overview}
+
+% TODO: Add system architecture diagram
+
+The proposed system combines the semantic understanding capabilities of Large Language Models with the generative flexibility of diffusion models to identify and localize code segments requiring refactoring.
+
+\subsection{System Architecture}
+
+The system consists of three main components:
+
+\begin{enumerate}
+    \item \textbf{Code Encoder:} Transforms source code into rich representations
+    \item \textbf{Diffusion Module:} Models the distribution of refactoring locations
+    \item \textbf{Localization Decoder:} Produces fine-grained localization predictions
+\end{enumerate}
+
+\section{Problem Formulation}
+
+\subsection{Task Definition}
+
+Given a source code file $C = \{l_1, l_2, ..., l_n\}$ consisting of $n$ lines, the task is to predict a binary label $y_i \in \{0, 1\}$ for each line $l_i$, where $y_i = 1$ indicates that line $l_i$ requires refactoring.
+
+\subsection{Input Representation}
+
+The input code is represented at multiple levels:
+\begin{itemize}
+    \item \textbf{Token level:} Sequential representation of code tokens
+    \item \textbf{Syntax level:} Abstract Syntax Tree representation
+    \item \textbf{Semantic level:} Learned embeddings capturing semantic information
+\end{itemize}
+
+\subsection{Output Format}
+
+The output is a probability distribution over code locations:
+\begin{equation}
+    P(y_i = 1 | C) = \sigma(f_\theta(l_i, C))
+\end{equation}
+
+where $f_\theta$ is the learned model and $\sigma$ is the sigmoid function.
+
+\section{Code Encoder}
+
+\subsection{Pre-trained Language Model}
+
+We utilize a pre-trained code-specific language model (e.g., CodeBERT, GraphCodeBERT) as the base encoder.
+
+\subsection{Multi-level Encoding}
+
+The encoder produces representations at multiple granularities:
+\begin{itemize}
+    \item Token-level embeddings: $\mathbf{h}_i^{token}$
+    \item Line-level embeddings: $\mathbf{h}_i^{line}$
+    \item Function-level embeddings: $\mathbf{h}_j^{func}$
+    \item File-level embedding: $\mathbf{h}^{file}$
+\end{itemize}
+
+\subsection{Structural Features}
+
+Additional features capture code structure:
+\begin{itemize}
+    \item Code complexity metrics
+    \item Dependency information
+    \item Nesting depth
+    \item Code patterns
+\end{itemize}
+
+\section{Diffusion Model}
+
+\subsection{Discrete Diffusion Process}
+
+We adapt diffusion models for discrete localization labels using a discrete state space.
+
+\subsubsection{Forward Diffusion}
+
+The forward process gradually corrupts the refactoring labels:
+\begin{equation}
+    q(y_t | y_{t-1}) = \text{Cat}(y_t; \mathbf{Q}_t y_{t-1})
+\end{equation}
+
+where $\mathbf{Q}_t$ is a transition matrix.
+
+\subsubsection{Reverse Diffusion}
+
+The reverse process learns to denoise:
+\begin{equation}
+    p_\theta(y_{t-1} | y_t, C) = \text{Cat}(y_{t-1}; \mathbf{p}_\theta(y_t, C, t))
+\end{equation}
+
+\subsection{Conditioning on Code Context}
+
+The diffusion model is conditioned on the code representation:
+\begin{equation}
+    \mathbf{p}_\theta(y_t, C, t) = \text{softmax}(f_\theta(y_t, \mathbf{h}^{code}, t))
+\end{equation}
+
+\subsection{Training Objective}
+
+The model is trained to minimize the variational lower bound:
+\begin{equation}
+    \mathcal{L} = \mathbb{E}_{q(y_{1:T}|y_0)} \left[ \sum_{t=1}^T D_{KL}(q(y_{t-1}|y_t, y_0) || p_\theta(y_{t-1}|y_t)) \right]
+\end{equation}
+
+\section{Localization Decoder}
+
+\subsection{Attention Mechanism}
+
+The decoder uses multi-head attention to aggregate information across code locations.
+
+\subsection{Hierarchical Decoding}
+
+Predictions are made hierarchically:
+\begin{enumerate}
+    \item File-level: Does the file contain refactoring opportunities?
+    \item Function-level: Which functions need refactoring?
+    \item Line-level: Which specific lines should be refactored?
+\end{enumerate}
+
+\subsection{Confidence Estimation}
+
+The model provides confidence scores for predictions to enable filtering and ranking.
+
+\section{Training Procedure}
+
+\subsection{Data Preparation}
+
+Training data consists of:
+\begin{itemize}
+    \item Source code files
+    \item Ground truth refactoring labels
+    \item Code metadata (language, project type)
+\end{itemize}
+
+\subsection{Training Strategy}
+
+\subsubsection{Two-stage Training}
+
+\begin{enumerate}
+    \item \textbf{Stage 1:} Fine-tune the code encoder on code understanding tasks
+    \item \textbf{Stage 2:} Train the full model end-to-end for refactoring localization
+\end{enumerate}
+
+\subsubsection{Optimization}
+
+\begin{itemize}
+    \item Optimizer: AdamW
+    \item Learning rate: $5 \times 10^{-5}$ with warmup
+    \item Batch size: 32
+    \item Gradient clipping: 1.0
+\end{itemize}
+
+\subsection{Data Augmentation}
+
+To improve robustness, we apply:
+\begin{itemize}
+    \item Variable renaming
+    \item Code formatting variations
+    \item Comment removal/addition
+\end{itemize}
+
+\subsection{Regularization}
+
+Techniques to prevent overfitting:
+\begin{itemize}
+    \item Dropout (0.1)
+    \item Label smoothing
+    \item Early stopping
+\end{itemize}
+
+\section{Inference}
+
+\subsection{Sampling Procedure}
+
+At inference time, we sample from the learned distribution:
+\begin{enumerate}
+    \item Start with random noise: $y_T \sim \mathcal{N}(0, I)$
+    \item Iteratively denoise: $y_{t-1} \sim p_\theta(y_{t-1}|y_t, C)$
+    \item Obtain final prediction: $\hat{y}_0$
+\end{enumerate}
+
+\subsection{Post-processing}
+
+Post-processing steps include:
+\begin{itemize}
+    \item Thresholding predictions
+    \item Merging adjacent predictions
+    \item Filtering based on confidence
+\end{itemize}
+
+\section{Multi-language Support}
+
+The approach is designed to generalize across programming languages by:
+\begin{itemize}
+    \item Using language-agnostic representations
+    \item Training on multi-language corpora
+    \item Language-specific fine-tuning when needed
+\end{itemize}
+
+\section{Summary}
+
+This chapter described the proposed methodology, including the system architecture, model components, training procedure, and inference process. The next chapter discusses implementation details.

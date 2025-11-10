@@ -1,0 +1,104 @@
+\documentclass[12pt,a4paper]{report}
+
+% Packages
+\usepackage[utf8]{inputenc}
+\usepackage[english]{babel}
+\usepackage{graphicx}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{natbib}
+\usepackage{geometry}
+\usepackage{setspace}
+\usepackage{fancyhdr}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{subcaption}
+
+% Geometry
+\geometry{left=3cm,right=2.5cm,top=2.5cm,bottom=2.5cm}
+
+% Line spacing
+\onehalfspacing
+
+% Code listing settings
+\lstset{
+    basicstyle=\ttfamily\small,
+    keywordstyle=\color{blue},
+    commentstyle=\color{green!50!black},
+    stringstyle=\color{red},
+    numbers=left,
+    numberstyle=\tiny\color{gray},
+    stepnumber=1,
+    numbersep=10pt,
+    backgroundcolor=\color{gray!5},
+    showspaces=false,
+    showstringspaces=false,
+    showtabs=false,
+    frame=single,
+    tabsize=2,
+    captionpos=b,
+    breaklines=true,
+    breakatwhitespace=false,
+    escapeinside={(*@}{@*)}
+}
+
+% Hyperlink settings
+\hypersetup{
+    colorlinks=true,
+    linkcolor=blue,
+    filecolor=magenta,
+    urlcolor=cyan,
+    citecolor=blue,
+    pdftitle={Diffusion LLM-based Code Refactoring Localization},
+    pdfauthor={Yongcheng Huang},
+}
+
+% Header and footer
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[R]{\thepage}
+\fancyhead[L]{\leftmark}
+\renewcommand{\headrulewidth}{0.4pt}
+
+\begin{document}
+
+% Title page
+\input{chapters/titlepage}
+
+% Abstract
+\input{chapters/abstract}
+
+% Acknowledgments
+\input{chapters/acknowledgments}
+
+% Table of contents
+\tableofcontents
+\listoffigures
+\listoftables
+
+% Chapters
+\input{chapters/01_introduction}
+\input{chapters/02_background}
+\input{chapters/03_literature_review}
+\input{chapters/04_methodology}
+\input{chapters/05_implementation}
+\input{chapters/06_experiments}
+\input{chapters/07_results}
+\input{chapters/08_discussion}
+\input{chapters/09_conclusion}
+
+% Bibliography
+\bibliographystyle{plainnat}
+\bibliography{references}
+
+% Appendices
+\appendix
+\input{chapters/appendix_a}
+\input{chapters/appendix_b}
+
+\end{document}

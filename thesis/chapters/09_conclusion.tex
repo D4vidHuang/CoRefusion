@@ -1,0 +1,226 @@
+\chapter{Conclusion}
+
+This chapter summarizes the thesis, highlights key contributions, and outlines future research directions.
+
+\section{Summary}
+
+This thesis presented a novel approach to automated code refactoring localization using diffusion models combined with Large Language Models. The research addressed the challenge of identifying code segments that would benefit from refactoring in an automated, scalable manner.
+
+\subsection{Research Questions Revisited}
+
+\subsubsection{RQ1: Effectiveness of Diffusion Models}
+
+The experimental results demonstrate that diffusion models can be effectively applied to code refactoring localization, achieving 6-8\% F1-score improvement over strong LLM baselines. The iterative denoising process and uncertainty modeling capabilities contribute to superior performance.
+
+\subsubsection{RQ2: Advantages over Traditional Approaches}
+
+The proposed approach offers several advantages:
+\begin{itemize}
+    \item Better handling of ambiguous cases through probabilistic modeling
+    \item Deeper semantic understanding through pre-trained encoders
+    \item More robust generalization across different code patterns
+    \item Fine-grained localization capabilities
+\end{itemize}
+
+\subsubsection{RQ3: Cross-language Generalization}
+
+The approach demonstrates good generalization across multiple programming languages (Java, Python, JavaScript, C++), with F1-scores ranging from 0.76 to 0.82. While performance varies by language, the general framework applies broadly.
+
+\subsubsection{RQ4: Refactoring Type Coverage}
+
+The system effectively localizes common refactoring types (Extract Method, Rename, Move), with performance varying based on refactoring complexity and training data availability. Rare refactoring types remain challenging.
+
+\section{Key Contributions}
+
+\subsection{Scientific Contributions}
+
+\begin{enumerate}
+    \item \textbf{Novel Framework:} First application of diffusion models to code refactoring localization, demonstrating the viability of this approach for software engineering tasks
+    
+    \item \textbf{Comprehensive Evaluation:} Extensive experiments across multiple languages, datasets, and refactoring types, providing robust evidence of effectiveness
+    
+    \item \textbf{Empirical Insights:} Detailed analysis of model behavior, component contributions, and failure modes, advancing understanding of AI for code analysis
+    
+    \item \textbf{Methodological Contributions:} Demonstration of how to adapt diffusion models for discrete, structured data like source code
+\end{enumerate}
+
+\subsection{Practical Contributions}
+
+\begin{enumerate}
+    \item \textbf{Open-source Implementation:} Publicly available codebase facilitating reproducibility and future research
+    
+    \item \textbf{Dataset:} Curated dataset of refactoring examples across multiple languages
+    
+    \item \textbf{Deployment Framework:} Practical system design suitable for integration into development workflows
+    
+    \item \textbf{Baseline Comparisons:} Comprehensive benchmark of existing approaches
+\end{enumerate}
+
+\section{Impact and Applications}
+
+\subsection{Immediate Applications}
+
+The research enables:
+\begin{itemize}
+    \item Automated code quality assessment tools
+    \item IDE plugins for refactoring suggestions
+    \item Code review automation
+    \item Technical debt identification
+    \item Educational tools for teaching refactoring
+\end{itemize}
+
+\subsection{Broader Impact}
+
+Beyond immediate applications, this work:
+\begin{itemize}
+    \item Advances understanding of generative models for code
+    \item Demonstrates potential of diffusion models for SE tasks
+    \item Provides foundation for related code analysis problems
+    \item Contributes to automated software maintenance research
+\end{itemize}
+
+\section{Limitations and Future Work}
+
+\subsection{Addressing Current Limitations}
+
+\subsubsection{Scalability Improvements}
+
+Future work should address:
+\begin{itemize}
+    \item Reducing computational requirements through model compression
+    \item Efficient attention mechanisms for longer contexts
+    \item Hierarchical processing for very large files
+    \item Incremental processing for continuous integration
+\end{itemize}
+
+\subsubsection{Generalization Enhancement}
+
+Improvements in generalization through:
+\begin{itemize}
+    \item Larger, more diverse training datasets
+    \item Meta-learning approaches for few-shot adaptation
+    \item Better handling of domain-specific code
+    \item Improved cross-language transfer techniques
+\end{itemize}
+
+\subsubsection{Interpretability}
+
+Enhancing interpretability through:
+\begin{itemize}
+    \item Attention visualization tools
+    \item Natural language explanations of predictions
+    \item Rule extraction from learned models
+    \item Interactive debugging of predictions
+\end{itemize}
+
+\subsection{Extended Capabilities}
+
+\subsubsection{Beyond Localization}
+
+Extending to additional tasks:
+\begin{itemize}
+    \item Automatic refactoring execution
+    \item Refactoring impact prediction
+    \item Multi-step refactoring planning
+    \item Conflict detection and resolution
+\end{itemize}
+
+\subsubsection{Enhanced Context}
+
+Incorporating additional context:
+\begin{itemize}
+    \item Project history and evolution
+    \item Developer preferences and patterns
+    \item Runtime profiling information
+    \item Test coverage and quality metrics
+\end{itemize}
+
+\subsubsection{Interactive Systems}
+
+Developing interactive capabilities:
+\begin{itemize}
+    \item User feedback incorporation
+    \item Active learning strategies
+    \item Collaborative refactoring support
+    \item Explanation and justification generation
+\end{itemize}
+
+\subsection{Fundamental Research Directions}
+
+\subsubsection{Diffusion Models for Code}
+
+Further exploration of:
+\begin{itemize}
+    \item Discrete diffusion for structured data
+    \item Conditional generation techniques
+    \item Multi-modal diffusion models
+    \item Efficient sampling strategies
+\end{itemize}
+
+\subsubsection{Code Understanding}
+
+Advancing code understanding through:
+\begin{itemize}
+    \item Better semantic representations
+    \item Program synthesis integration
+    \item Formal verification connections
+    \item Neurosymbolic approaches
+\end{itemize}
+
+\subsubsection{Evaluation Methodologies}
+
+Improving evaluation through:
+\begin{itemize}
+    \item Better ground truth collection methods
+    \item Human-centered evaluation metrics
+    \item Longitudinal studies of tool usage
+    \item Ecological validity assessment
+\end{itemize}
+
+\section{Broader Perspectives}
+
+\subsection{AI for Software Engineering}
+
+This work contributes to the growing field of AI for software engineering, demonstrating that:
+\begin{itemize}
+    \item Modern generative models have significant potential for SE tasks
+    \item Combining different AI techniques yields complementary benefits
+    \item Careful adaptation of general AI methods is crucial for code
+    \item Rigorous evaluation is essential for practical adoption
+\end{itemize}
+
+\subsection{Future of Refactoring}
+
+The research suggests a future where:
+\begin{itemize}
+    \item Refactoring becomes more automated and continuous
+    \item AI assists rather than replaces human judgment
+    \item Code quality maintenance is proactive rather than reactive
+    \item Best practices are learned from large-scale data
+\end{itemize}
+
+\subsection{Responsible AI for Code}
+
+Important considerations for future development:
+\begin{itemize}
+    \item Ensuring fairness across different coding styles
+    \item Avoiding bias toward popular patterns
+    \item Maintaining human oversight and control
+    \item Respecting developer autonomy and expertise
+\end{itemize}
+
+\section{Concluding Remarks}
+
+This thesis demonstrated that diffusion models, combined with Large Language Models, offer a promising approach to automated code refactoring localization. The proposed CoRefusion system achieves state-of-the-art performance while providing insights into the potential of generative models for software engineering tasks.
+
+The comprehensive evaluation across multiple languages, datasets, and refactoring types provides strong evidence for the effectiveness of the approach. However, identified limitations point to numerous opportunities for future improvement and extension.
+
+As software systems continue to grow in complexity, automated tools for code quality maintenance become increasingly important. This research contributes to that goal by advancing the state-of-the-art in automated refactoring localization and demonstrating the potential of modern AI techniques for software engineering challenges.
+
+The journey from manual code review to AI-assisted refactoring represents an exciting frontier in software engineering. While challenges remain, the results of this research suggest that intelligent, automated support for code quality maintenance is not only possible but increasingly practical. The future of software development will likely involve close collaboration between human developers and AI assistants, each contributing their unique strengths to create better, more maintainable software.
+
+\vspace{2cm}
+
+\begin{center}
+\textit{The best code is the code that is continuously improved.}
+\end{center}

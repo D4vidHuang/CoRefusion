@@ -1,0 +1,231 @@
+\chapter{Supplementary Materials}
+
+\section{Additional Experimental Results}
+
+\subsection{Detailed Performance Metrics}
+
+% TODO: Add comprehensive results tables
+
+\subsection{Per-project Results}
+
+% Include detailed breakdown of performance across individual projects
+
+\subsection{Hyperparameter Sensitivity Analysis}
+
+% Include plots showing impact of different hyperparameters
+
+\section{Dataset Details}
+
+\subsection{Data Collection Process}
+
+Detailed steps for dataset construction:
+
+\begin{enumerate}
+    \item Query GitHub API for repositories with specific criteria
+    \item Clone repositories and analyze commit history
+    \item Identify refactoring commits using RefactoringMiner
+    \item Extract code before and after refactoring
+    \item Annotate refactoring locations and types
+    \item Filter and validate annotations
+    \item Split into train/validation/test sets
+\end{enumerate}
+
+\subsection{Data Statistics}
+
+Comprehensive statistics about the dataset including:
+\begin{itemize}
+    \item File size distribution
+    \item Complexity distribution
+    \item Refactoring type frequencies
+    \item Language-specific patterns
+\end{itemize}
+
+\subsection{Data Quality Assurance}
+
+Quality control measures:
+\begin{itemize}
+    \item Manual validation of sample annotations
+    \item Consistency checks
+    \item Duplicate detection and removal
+    \item Outlier analysis
+\end{itemize}
+
+\section{Implementation Details}
+
+\subsection{Complete Model Architecture}
+
+% Include detailed architecture diagrams
+
+\subsection{Training Infrastructure}
+
+Detailed description of:
+\begin{itemize}
+    \item Hardware configuration
+    \item Distributed training setup
+    \item Monitoring and logging
+    \item Checkpoint management
+\end{itemize}
+
+\subsection{Preprocessing Pipeline}
+
+Step-by-step preprocessing:
+\begin{lstlisting}[language=Python, caption=Preprocessing pipeline]
+def preprocess_code(source_code, language):
+    # Parse code
+    tree = parse_code(source_code, language)
+    
+    # Extract tokens
+    tokens = extract_tokens(tree)
+    
+    # Generate features
+    features = compute_features(tree, tokens)
+    
+    # Create embeddings
+    embeddings = encode_tokens(tokens)
+    
+    return {
+        'tokens': tokens,
+        'features': features,
+        'embeddings': embeddings,
+        'tree': tree
+    }
+\end{lstlisting}
+
+\section{Code Examples}
+
+\subsection{Successful Localization Examples}
+
+\subsubsection{Example 1: Extract Method}
+
+\begin{lstlisting}[language=Java, caption=Before refactoring]
+public void processOrder(Order order) {
+    // Validate order
+    if (order.items.isEmpty()) {
+        throw new InvalidOrderException();
+    }
+    
+    // Calculate total
+    double total = 0;
+    for (Item item : order.items) {
+        total += item.price * item.quantity;
+    }
+    
+    // Apply discount
+    if (order.customer.isPremium()) {
+        total *= 0.9;
+    }
+    
+    order.total = total;
+}
+\end{lstlisting}
+
+Model correctly identifies lines 6-9 as candidates for Extract Method refactoring.
+
+\subsubsection{Example 2: Rename Variable}
+
+% Include more examples
+
+\subsection{Failure Case Examples}
+
+\subsubsection{False Positive}
+
+% Include example where model incorrectly suggests refactoring
+
+\subsubsection{False Negative}
+
+% Include example where model misses refactoring opportunity
+
+\section{Experimental Configurations}
+
+\subsection{Configuration Files}
+
+Complete configuration files for reproducibility.
+
+\subsubsection{Training Configuration}
+
+\begin{lstlisting}[language=yaml, caption=Training configuration]
+model:
+  encoder: "microsoft/codebert-base"
+  hidden_dim: 768
+  num_layers: 12
+  num_heads: 12
+  dropout: 0.1
+  
+diffusion:
+  num_timesteps: 1000
+  beta_schedule: "linear"
+  
+training:
+  batch_size: 32
+  learning_rate: 5e-5
+  num_epochs: 50
+  warmup_steps: 1000
+  gradient_clip: 1.0
+  
+optimizer:
+  type: "adamw"
+  weight_decay: 0.01
+  
+scheduler:
+  type: "linear"
+  warmup_ratio: 0.1
+\end{lstlisting}
+
+\subsection{Baseline Configurations}
+
+Configurations for all baseline methods to ensure fair comparison.
+
+\section{Additional Visualizations}
+
+\subsection{Attention Maps}
+
+% Include attention visualization examples
+
+\subsection{Embedding Visualizations}
+
+% Include t-SNE or UMAP plots of code embeddings
+
+\subsection{Learning Curves}
+
+% Include training/validation curves for all experiments
+
+\section{Statistical Analysis Details}
+
+\subsection{Significance Testing Results}
+
+Complete results of statistical tests:
+\begin{itemize}
+    \item Paired t-tests between all method pairs
+    \item Effect sizes (Cohen's d)
+    \item Confidence intervals
+    \item Power analysis
+\end{itemize}
+
+\subsection{Correlation Analysis}
+
+Analysis of correlations between:
+\begin{itemize}
+    \item Code metrics and refactoring likelihood
+    \item Model confidence and correctness
+    \item Dataset characteristics and performance
+\end{itemize}
+
+\section{User Study Materials}
+
+\subsection{Study Protocol}
+
+Detailed protocol for user study:
+\begin{enumerate}
+    \item Participant recruitment criteria
+    \item Task descriptions
+    \item Evaluation rubrics
+    \item Data collection procedures
+\end{enumerate}
+
+\subsection{Questionnaires}
+
+% Include questionnaires used in user study
+
+\subsection{Participant Responses}
+
+Aggregated and anonymized participant responses and feedback.

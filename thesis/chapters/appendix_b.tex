@@ -1,0 +1,326 @@
+\chapter{Research Ethics and Reproducibility}
+
+\section{Ethical Considerations}
+
+\subsection{Data Ethics}
+
+\subsubsection{Open Source Code Usage}
+
+All code used in this research:
+\begin{itemize}
+    \item Comes from publicly available open-source repositories
+    \item Respects original licenses (MIT, Apache, BSD, GPL)
+    \item Properly attributes original authors
+    \item Does not include proprietary code
+\end{itemize}
+
+\subsubsection{Privacy Considerations}
+
+\begin{itemize}
+    \item No personal data collected beyond publicly available information
+    \item Repository metadata anonymized where appropriate
+    \item No tracking of individual developers
+    \item Compliance with data protection regulations
+\end{itemize}
+
+\subsection{User Study Ethics}
+
+For the user study component:
+\begin{itemize}
+    \item Informed consent obtained from all participants
+    \item Participants informed of data usage
+    \item Right to withdraw at any time
+    \item Anonymization of responses
+    \item IRB approval obtained (if applicable)
+\end{itemize}
+
+\subsection{Responsible AI Considerations}
+
+\subsubsection{Bias Mitigation}
+
+Efforts to mitigate bias:
+\begin{itemize}
+    \item Diverse dataset spanning multiple languages and domains
+    \item Evaluation of performance across different code styles
+    \item Awareness of potential historical biases in training data
+    \item Transparency about model limitations
+\end{itemize}
+
+\subsubsection{Intended Use}
+
+Clear guidelines for intended use:
+\begin{itemize}
+    \item Tool should assist, not replace, human judgment
+    \item Predictions should be reviewed by developers
+    \item Not suitable for safety-critical code without validation
+    \item Continuous monitoring recommended in production use
+\end{itemize}
+
+\section{Reproducibility}
+
+\subsection{Code Repository}
+
+\subsubsection{Repository Structure}
+
+Complete code available at: \url{https://github.com/D4vidHuang/CoRefusion}
+
+Contents include:
+\begin{itemize}
+    \item Source code for all models
+    \item Training and evaluation scripts
+    \item Data processing pipelines
+    \item Configuration files
+    \item Documentation
+    \item Example notebooks
+\end{itemize}
+
+\subsubsection{Version Information}
+
+\begin{itemize}
+    \item Git commit hash for exact version used in thesis
+    \item Tagged releases for major experiments
+    \item Dependency versions locked in requirements.txt
+\end{itemize}
+
+\subsection{Data Availability}
+
+\subsubsection{Dataset Release}
+
+Dataset available through:
+\begin{itemize}
+    \item Zenodo repository with DOI
+    \item Instructions for regenerating from source
+    \item Metadata and statistics
+    \item License information
+\end{itemize}
+
+\subsubsection{Data Format}
+
+Standardized format for easy reuse:
+\begin{itemize}
+    \item JSON/JSONL for structured data
+    \item Clear schema documentation
+    \item Example loading scripts
+    \item Validation tools
+\end{itemize}
+
+\subsection{Model Checkpoints}
+
+\subsubsection{Pre-trained Models}
+
+Available checkpoints:
+\begin{itemize}
+    \item Final trained models
+    \item Intermediate checkpoints
+    \item Model cards with metadata
+    \item Loading and inference examples
+\end{itemize}
+
+\subsubsection{Checkpoint Format}
+
+\begin{itemize}
+    \item PyTorch state dictionaries
+    \item Hugging Face Hub compatible
+    \item Configuration files included
+    \item Version compatibility information
+\end{itemize}
+
+\subsection{Reproduction Guide}
+
+\subsubsection{Environment Setup}
+
+Complete instructions for setting up the environment:
+
+\begin{lstlisting}[language=bash, caption=Environment setup]
+# Clone repository
+git clone https://github.com/D4vidHuang/CoRefusion.git
+cd CoRefusion
+
+# Create virtual environment
+python -m venv venv
+source venv/bin/activate
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Set up pre-commit hooks
+pre-commit install
+
+# Verify installation
+python -m pytest tests/
+\end{lstlisting}
+
+\subsubsection{Data Preparation}
+
+Steps to prepare data:
+
+\begin{lstlisting}[language=bash, caption=Data preparation]
+# Download raw data
+python src/data/download_data.py
+
+# Preprocess data
+python src/data/preprocess.py \
+    --config experiments/configs/data_config.yaml
+
+# Verify data
+python src/data/verify_data.py
+\end{lstlisting}
+
+\subsubsection{Training Reproduction}
+
+Commands to reproduce training:
+
+\begin{lstlisting}[language=bash, caption=Training reproduction]
+# Train main model
+python src/models/train.py \
+    --config experiments/configs/main_experiment.yaml \
+    --seed 42
+
+# Train ablation variants
+for config in experiments/configs/ablation/*.yaml; do
+    python src/models/train.py --config $config --seed 42
+done
+\end{lstlisting}
+
+\subsubsection{Evaluation Reproduction}
+
+Commands to reproduce evaluation:
+
+\begin{lstlisting}[language=bash, caption=Evaluation reproduction]
+# Evaluate main model
+python src/evaluation/evaluate.py \
+    --checkpoint experiments/checkpoints/main_model.pt \
+    --config experiments/configs/eval_config.yaml
+
+# Run statistical tests
+python src/evaluation/statistical_tests.py \
+    --results_dir results/
+
+# Generate figures
+python src/visualization/generate_figures.py \
+    --results_dir results/ \
+    --output_dir results/figures/
+\end{lstlisting}
+
+\subsection{Hardware Requirements}
+
+\subsubsection{Minimum Requirements}
+
+To run inference:
+\begin{itemize}
+    \item CPU: 4 cores
+    \item RAM: 16GB
+    \item GPU: 8GB VRAM (optional but recommended)
+    \item Storage: 50GB
+\end{itemize}
+
+\subsubsection{Recommended Requirements}
+
+For full training:
+\begin{itemize}
+    \item CPU: 16+ cores
+    \item RAM: 64GB+
+    \item GPU: NVIDIA A100 40GB or equivalent
+    \item Storage: 500GB SSD
+\end{itemize}
+
+\subsubsection{Cloud Alternatives}
+
+Suggestions for cloud execution:
+\begin{itemize}
+    \item Google Colab Pro for small experiments
+    \item AWS EC2 p3.2xlarge or similar
+    \item Azure NC-series VMs
+    \item Paperspace Gradient
+\end{itemize}
+
+\subsection{Expected Runtime}
+
+Approximate runtime for different components:
+
+\begin{table}[h]
+\centering
+\begin{tabular}{lr}
+\toprule
+Task & Time (GPU) \\
+\midrule
+Data preprocessing & 2-4 hours \\
+Training (main model) & 24-48 hours \\
+Evaluation (full test set) & 2-4 hours \\
+Ablation studies (all) & 3-5 days \\
+\bottomrule
+\end{tabular}
+\caption{Expected runtime}
+\end{table}
+
+\subsection{Troubleshooting}
+
+\subsubsection{Common Issues}
+
+Solutions to common problems:
+
+\begin{enumerate}
+    \item \textbf{Out of memory errors}
+    \begin{itemize}
+        \item Reduce batch size
+        \item Enable gradient checkpointing
+        \item Use smaller model variant
+    \end{itemize}
+    
+    \item \textbf{Dependency conflicts}
+    \begin{itemize}
+        \item Use provided requirements.txt exactly
+        \item Create fresh virtual environment
+        \item Check Python version (3.8-3.10)
+    \end{itemize}
+    
+    \item \textbf{Download failures}
+    \begin{itemize}
+        \item Check internet connection
+        \item Verify Hugging Face token (if needed)
+        \item Use mirror repositories
+    \end{itemize}
+\end{enumerate}
+
+\subsubsection{Getting Help}
+
+Resources for assistance:
+\begin{itemize}
+    \item GitHub Issues: Report bugs and ask questions
+    \item Documentation: Comprehensive guides and tutorials
+    \item Email: Contact author for specific issues
+    \item Community: Discussion forum for users
+\end{itemize}
+
+\section{Research Artifacts}
+
+\subsection{Digital Object Identifiers (DOIs)}
+
+Permanent links to research artifacts:
+\begin{itemize}
+    \item Dataset: [Zenodo DOI]
+    \item Code: [Software Heritage/GitHub Archive DOI]
+    \item Models: [Hugging Face Hub DOI]
+    \item Thesis: [University Repository DOI]
+\end{itemize}
+
+\subsection{Long-term Preservation}
+
+Steps taken for long-term preservation:
+\begin{itemize}
+    \item Archival on Zenodo
+    \item Software Heritage archival
+    \item University repository deposit
+    \item Multiple backup locations
+\end{itemize}
+
+\section{Contact Information}
+
+For questions about reproduction or data access:
+
+\begin{itemize}
+    \item Email: [your.email@university.edu]
+    \item GitHub: @D4vidHuang
+    \item Twitter/X: [handle]
+    \item Research Gate: [profile]
+\end{itemize}

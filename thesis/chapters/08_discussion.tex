@@ -1,0 +1,310 @@
+\chapter{Discussion}
+
+This chapter interprets the experimental results, discusses implications, identifies limitations, and addresses threats to validity.
+
+\section{Interpretation of Results}
+
+\subsection{Why Diffusion Models Help}
+
+The superior performance of the diffusion-based approach can be attributed to:
+
+\begin{itemize}
+    \item \textbf{Uncertainty modeling:} Diffusion models naturally capture uncertainty in refactoring decisions
+    \item \textbf{Gradual refinement:} The iterative denoising process allows progressive refinement of predictions
+    \item \textbf{Context integration:} The conditioning mechanism effectively incorporates code context
+    \item \textbf{Distribution matching:} Learning the distribution of refactoring locations rather than direct classification
+\end{itemize}
+
+\subsection{Component Contributions}
+
+\subsubsection{Pre-trained Code Encoder}
+
+The large improvement from pre-training demonstrates the importance of:
+\begin{itemize}
+    \item Large-scale code understanding
+    \item Transfer learning from related tasks
+    \item Rich semantic representations
+\end{itemize}
+
+\subsubsection{Structural Features}
+
+Structural features capture important aspects:
+\begin{itemize}
+    \item Code organization
+    \item Complexity metrics
+    \item Dependency patterns
+\end{itemize}
+
+\subsection{Cross-language Performance}
+
+The variation in performance across languages reflects:
+\begin{itemize}
+    \item Dataset size differences
+    \item Language-specific idioms
+    \item Varying refactoring practices
+    \item Parser quality differences
+\end{itemize}
+
+\section{Comparison with Baselines}
+
+\subsection{Traditional Methods}
+
+Traditional rule-based and metric-based approaches are limited by:
+\begin{itemize}
+    \item Reliance on predefined patterns
+    \item Lack of context understanding
+    \item High false positive rates
+    \item Language-specific implementations
+\end{itemize}
+
+\subsection{Machine Learning Baselines}
+
+Classical ML and standard deep learning methods show:
+\begin{itemize}
+    \item Better generalization than rule-based methods
+    \item Limited semantic understanding
+    \item Difficulty with long-range dependencies
+    \item Need for extensive feature engineering
+\end{itemize}
+
+\subsection{LLM-based Baselines}
+
+Standard LLM fine-tuning provides strong performance but:
+\begin{itemize}
+    \item Lacks explicit uncertainty modeling
+    \item May overfit to training patterns
+    \item Limited interpretability
+\end{itemize}
+
+The diffusion-based approach addresses these limitations through probabilistic modeling.
+
+\section{Implications}
+
+\subsection{For Software Engineering Practice}
+
+\subsubsection{Automated Code Review}
+
+The system can assist in:
+\begin{itemize}
+    \item Prioritizing code review efforts
+    \item Identifying technical debt
+    \item Supporting continuous refactoring
+    \item Maintaining code quality
+\end{itemize}
+
+\subsubsection{Developer Support}
+
+Potential applications include:
+\begin{itemize}
+    \item IDE integration for real-time suggestions
+    \item Pre-commit hooks
+    \item CI/CD pipeline integration
+    \item Educational tools for learning refactoring
+\end{itemize}
+
+\subsection{For Research}
+
+\subsubsection{Diffusion Models for Code}
+
+This work demonstrates that diffusion models can be effectively applied to code analysis tasks, opening possibilities for:
+\begin{itemize}
+    \item Other code generation and analysis tasks
+    \item Improved uncertainty quantification
+    \item Better handling of ambiguous cases
+\end{itemize}
+
+\subsubsection{Multi-modal Code Understanding}
+
+The combination of different representations (tokens, AST, metrics) suggests benefits from:
+\begin{itemize}
+    \item Multi-modal learning approaches
+    \item Hierarchical representations
+    \item Fusion of complementary information sources
+\end{itemize}
+
+\section{Limitations}
+
+\subsection{Dataset Limitations}
+
+\subsubsection{Coverage}
+
+\begin{itemize}
+    \item Limited to open-source projects
+    \item Potential bias toward popular languages
+    \item May not reflect proprietary codebase patterns
+    \item Historical bias in refactoring practices
+\end{itemize}
+
+\subsubsection{Labeling Quality}
+
+\begin{itemize}
+    \item Automated label extraction may introduce noise
+    \item Different developers have different refactoring preferences
+    \item Temporal context not always captured
+\end{itemize}
+
+\subsection{Model Limitations}
+
+\subsubsection{Scalability}
+
+\begin{itemize}
+    \item Computational cost higher than simpler baselines
+    \item Memory requirements limit context length
+    \item Inference time may be prohibitive for very large codebases
+\end{itemize}
+
+\subsubsection{Generalization}
+
+\begin{itemize}
+    \item Performance degrades on rare refactoring types
+    \item Limited cross-domain transfer
+    \item Requires substantial training data
+\end{itemize}
+
+\subsubsection{Interpretability}
+
+\begin{itemize}
+    \item Diffusion process is less interpretable than rule-based methods
+    \item Difficult to explain specific predictions
+    \item Limited actionable feedback for developers
+\end{itemize}
+
+\subsection{Evaluation Limitations}
+
+\subsubsection{Metrics}
+
+\begin{itemize}
+    \item Standard metrics may not fully capture usefulness
+    \item No direct measure of developer productivity impact
+    \item Difficulty measuring opportunity cost of missed refactorings
+\end{itemize}
+
+\subsubsection{User Study}
+
+\begin{itemize}
+    \item Limited scale of user evaluation
+    \item Potential bias in participant selection
+    \item Controlled setting may not reflect real usage
+\end{itemize}
+
+\section{Threats to Validity}
+
+\subsection{Internal Validity}
+
+Potential threats include:
+\begin{itemize}
+    \item Hyperparameter selection bias
+    \item Implementation bugs
+    \item Non-deterministic training
+    \item Data leakage
+\end{itemize}
+
+\textbf{Mitigation strategies:}
+\begin{itemize}
+    \item Systematic hyperparameter search
+    \item Extensive testing and code review
+    \item Multiple runs with different seeds
+    \item Careful data split validation
+\end{itemize}
+
+\subsection{External Validity}
+
+Generalization concerns:
+\begin{itemize}
+    \item Limited to studied programming languages
+    \item Focus on specific refactoring types
+    \item Open-source project bias
+    \item Temporal generalization not tested
+\end{itemize}
+
+\textbf{Mitigation strategies:}
+\begin{itemize}
+    \item Evaluation on diverse datasets
+    \item Multiple language evaluation
+    \item Benchmark dataset inclusion
+\end{itemize}
+
+\subsection{Construct Validity}
+
+Measurement concerns:
+\begin{itemize}
+    \item Metrics may not capture true refactoring quality
+    \item Ground truth ambiguity
+    \item Evaluation granularity choices
+\end{itemize}
+
+\textbf{Mitigation strategies:}
+\begin{itemize}
+    \item Multiple complementary metrics
+    \item Qualitative analysis
+    \item User study validation
+\end{itemize}
+
+\subsection{Conclusion Validity}
+
+Statistical concerns:
+\begin{itemize}
+    \item Multiple comparisons
+    \item Sample size adequacy
+    \item Assumption violations
+\end{itemize}
+
+\textbf{Mitigation strategies:}
+\begin{itemize}
+    \item Bonferroni correction
+    \item Statistical power analysis
+    \item Non-parametric tests where appropriate
+\end{itemize}
+
+\section{Unexpected Findings}
+
+\subsection{Emergent Behaviors}
+
+Several unexpected observations:
+\begin{itemize}
+    \item Model sometimes identifies valid refactorings not in ground truth
+    \item Attention patterns reveal novel code smell indicators
+    \item Cross-language transfer better than expected for syntactically similar languages
+\end{itemize}
+
+\subsection{Failure Mode Analysis}
+
+Detailed analysis reveals:
+\begin{itemize}
+    \item Specific patterns that confuse the model
+    \item Context length limitations more impactful than expected
+    \item Importance of training data diversity
+\end{itemize}
+
+\section{Lessons Learned}
+
+\subsection{Technical Insights}
+
+\begin{itemize}
+    \item Importance of careful conditioning in diffusion models
+    \item Value of multi-level representations
+    \item Need for domain-specific adaptations
+    \item Benefits of probabilistic approaches for ambiguous tasks
+\end{itemize}
+
+\subsection{Methodological Insights}
+
+\begin{itemize}
+    \item Comprehensive evaluation beyond standard metrics
+    \item Importance of qualitative analysis
+    \item Value of ablation studies
+    \item Need for diverse baseline comparisons
+\end{itemize}
+
+\section{Summary}
+
+This chapter discussed the implications of results, identified limitations, and addressed threats to validity. Key takeaways include:
+
+\begin{itemize}
+    \item Diffusion models offer advantages for uncertain, context-dependent tasks
+    \item The approach shows promise for practical software engineering applications
+    \item Several limitations suggest directions for future improvement
+    \item Rigorous evaluation strengthens confidence in findings
+\end{itemize}
+
+The next chapter concludes the thesis and outlines future research directions.

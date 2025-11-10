@@ -1,0 +1,55 @@
+# Training configuration for CoRefusion
+
+experiment_name: "corefusion_baseline"
+use_wandb: true
+
+# Model configuration
+model:
+  encoder: "microsoft/codebert-base"
+  hidden_dim: 768
+  num_layers: 12
+  num_heads: 12
+  dropout: 0.1
+
+# Diffusion configuration
+diffusion:
+  num_timesteps: 1000
+  beta_schedule: "linear"
+  num_classes: 2
+
+# Training configuration
+training:
+  batch_size: 32
+  num_epochs: 50
+  learning_rate: 5.0e-5
+  warmup_steps: 1000
+  gradient_clip: 1.0
+  patience: 5
+  checkpoint_dir: "experiments/checkpoints"
+  log_interval: 100
+
+# Optimizer configuration
+optimizer:
+  type: "adamw"
+  weight_decay: 0.01
+  betas: [0.9, 0.999]
+  eps: 1.0e-8
+
+# Scheduler configuration
+scheduler:
+  type: "linear"
+  warmup_ratio: 0.1
+
+# Data configuration
+data:
+  train_path: "data/processed/train.json"
+  val_path: "data/processed/val.json"
+  test_path: "data/processed/test.json"
+  max_length: 512
+  num_workers: 4
+
+# Hardware configuration
+hardware:
+  device: "cuda"
+  mixed_precision: true
+  distributed: false

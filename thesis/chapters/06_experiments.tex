@@ -1,0 +1,307 @@
+\chapter{Experiments}
+
+This chapter describes the experimental setup, including datasets, baseline methods, evaluation metrics, and experimental configurations.
+
+\section{Research Questions}
+
+The experiments are designed to answer the following questions:
+
+\begin{enumerate}
+    \item \textbf{RQ1:} How does the proposed approach perform compared to baseline methods?
+    \item \textbf{RQ2:} What is the impact of different components (diffusion module, code encoder)?
+    \item \textbf{RQ3:} How does the approach generalize across programming languages?
+    \item \textbf{RQ4:} What types of refactorings can the model effectively localize?
+    \item \textbf{RQ5:} How does model performance scale with dataset size and diversity?
+\end{enumerate}
+
+\section{Datasets}
+
+\subsection{Primary Dataset}
+
+\subsubsection{Construction}
+% TODO: Describe dataset construction process in detail
+
+The primary dataset is constructed from GitHub repositories with documented refactoring commits.
+
+\subsubsection{Statistics}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{lrrrr}
+\toprule
+Language & Projects & Files & Lines & Refactorings \\
+\midrule
+Java & 100 & 5,000 & 1.2M & 25,000 \\
+Python & 100 & 4,000 & 800K & 20,000 \\
+JavaScript & 80 & 3,500 & 600K & 15,000 \\
+C++ & 50 & 2,500 & 500K & 10,000 \\
+\midrule
+Total & 330 & 15,000 & 3.1M & 70,000 \\
+\bottomrule
+\end{tabular}
+\caption{Primary dataset statistics}
+\label{tab:primary_dataset}
+\end{table}
+
+\subsection{Benchmark Datasets}
+
+Additional evaluation on established benchmarks:
+\begin{itemize}
+    \item RefactoringMiner dataset
+    \item Defects4J (for comparison with bug localization)
+    \item Custom curated dataset of refactoring examples
+\end{itemize}
+
+\subsection{Data Distribution}
+
+\subsubsection{Refactoring Types}
+
+Distribution of refactoring types in the dataset:
+\begin{itemize}
+    \item Extract Method: 30\%
+    \item Rename: 25\%
+    \item Move Method/Class: 15\%
+    \item Extract Variable: 10\%
+    \item Inline: 8\%
+    \item Other: 12\%
+\end{itemize}
+
+\subsubsection{Code Complexity}
+
+Files are distributed across complexity levels based on cyclomatic complexity and lines of code.
+
+\section{Baseline Methods}
+
+\subsection{Traditional Approaches}
+
+\subsubsection{Static Analysis}
+\begin{itemize}
+    \item PMD with default rules
+    \item SonarQube analysis
+    \item Custom rule-based detector
+\end{itemize}
+
+\subsubsection{Metric-based}
+\begin{itemize}
+    \item Threshold-based on code metrics
+    \item Complexity-driven detection
+\end{itemize}
+
+\subsection{Machine Learning Baselines}
+
+\subsubsection{Classical ML}
+\begin{itemize}
+    \item Random Forest with handcrafted features
+    \item Support Vector Machine (SVM)
+    \item Gradient Boosting (XGBoost)
+\end{itemize}
+
+\subsubsection{Deep Learning}
+\begin{itemize}
+    \item LSTM-based sequence classifier
+    \item CNN for code classification
+    \item Graph Neural Network on AST
+\end{itemize}
+
+\subsection{LLM-based Baselines}
+
+\subsubsection{Standard Fine-tuning}
+\begin{itemize}
+    \item CodeBERT fine-tuned for classification
+    \item GraphCodeBERT
+    \item CodeT5
+\end{itemize}
+
+\subsubsection{Prompt-based}
+\begin{itemize}
+    \item GPT-3.5 with zero-shot prompting
+    \item GPT-3.5 with few-shot prompting
+    \item GPT-4 (if available)
+\end{itemize}
+
+\section{Evaluation Metrics}
+
+\subsection{Primary Metrics}
+
+\subsubsection{Localization Accuracy}
+\begin{itemize}
+    \item \textbf{Precision}: $P = \frac{TP}{TP + FP}$
+    \item \textbf{Recall}: $R = \frac{TP}{TP + FN}$
+    \item \textbf{F1-score}: $F1 = 2 \times \frac{P \times R}{P + R}$
+    \item \textbf{Accuracy}: $Acc = \frac{TP + TN}{TP + TN + FP + FN}$
+\end{itemize}
+
+\subsubsection{Ranking Metrics}
+\begin{itemize}
+    \item Mean Average Precision (MAP)
+    \item Normalized Discounted Cumulative Gain (NDCG)
+    \item Mean Reciprocal Rank (MRR)
+\end{itemize}
+
+\subsection{Secondary Metrics}
+
+\subsubsection{Granularity-specific}
+\begin{itemize}
+    \item Line-level accuracy
+    \item Method-level accuracy
+    \item Class-level accuracy
+\end{itemize}
+
+\subsubsection{Efficiency}
+\begin{itemize}
+    \item Inference time per file
+    \item Memory usage
+    \item Model size
+\end{itemize}
+
+\section{Experimental Setup}
+
+\subsection{Hardware Configuration}
+
+\begin{itemize}
+    \item \textbf{GPU}: NVIDIA A100 (40GB) or V100 (32GB)
+    \item \textbf{CPU}: Intel Xeon (32 cores)
+    \item \textbf{RAM}: 256GB
+    \item \textbf{Storage}: 2TB SSD
+\end{itemize}
+
+\subsection{Software Environment}
+
+\begin{itemize}
+    \item \textbf{OS}: Ubuntu 20.04 LTS
+    \item \textbf{Python}: 3.9
+    \item \textbf{PyTorch}: 2.0
+    \item \textbf{CUDA}: 11.8
+\end{itemize}
+
+\subsection{Hyperparameters}
+
+\subsubsection{Model Configuration}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{ll}
+\toprule
+Parameter & Value \\
+\midrule
+Hidden dimension & 768 \\
+Number of layers & 12 \\
+Attention heads & 12 \\
+Diffusion timesteps & 1000 \\
+Dropout rate & 0.1 \\
+\bottomrule
+\end{tabular}
+\caption{Model hyperparameters}
+\label{tab:hyperparameters}
+\end{table}
+
+\subsubsection{Training Configuration}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{ll}
+\toprule
+Parameter & Value \\
+\midrule
+Learning rate & 5e-5 \\
+Batch size & 32 \\
+Epochs & 50 \\
+Warmup steps & 1000 \\
+Weight decay & 0.01 \\
+Optimizer & AdamW \\
+\bottomrule
+\end{tabular}
+\caption{Training hyperparameters}
+\label{tab:training_config}
+\end{table}
+
+\section{Experimental Procedures}
+
+\subsection{Main Experiments}
+
+\subsubsection{Experiment 1: Overall Performance}
+Compare the proposed approach against all baselines on the primary dataset.
+
+\subsubsection{Experiment 2: Ablation Study}
+Evaluate the contribution of each component:
+\begin{itemize}
+    \item Without diffusion module
+    \item Without pre-trained encoder
+    \item Without structural features
+    \item Simplified architecture
+\end{itemize}
+
+\subsubsection{Experiment 3: Cross-language Evaluation}
+Evaluate generalization across programming languages:
+\begin{itemize}
+    \item Within-language performance
+    \item Cross-language transfer
+    \item Multi-language training
+\end{itemize}
+
+\subsubsection{Experiment 4: Refactoring Type Analysis}
+Performance breakdown by refactoring type.
+
+\subsubsection{Experiment 5: Scalability Analysis}
+Evaluate with varying dataset sizes and code complexity levels.
+
+\subsection{Validation Procedure}
+
+\begin{enumerate}
+    \item Split data into train/validation/test (70/15/15)
+    \item Train on training set with early stopping on validation set
+    \item Report final metrics on test set
+    \item Perform statistical significance testing
+\end{enumerate}
+
+\subsection{Statistical Testing}
+
+\begin{itemize}
+    \item Paired t-test for comparison with baselines
+    \item Bonferroni correction for multiple comparisons
+    \item Confidence intervals (95\%)
+\end{itemize}
+
+\section{Qualitative Analysis}
+
+\subsection{Case Studies}
+
+Detailed analysis of specific examples:
+\begin{itemize}
+    \item Successful localizations
+    \item Failure cases
+    \item Edge cases
+\end{itemize}
+
+\subsection{Error Analysis}
+
+Categorization of prediction errors:
+\begin{itemize}
+    \item False positives
+    \item False negatives
+    \item Boundary errors
+\end{itemize}
+
+\section{Reproducibility}
+
+\subsection{Code and Data Availability}
+
+\begin{itemize}
+    \item Source code published on GitHub
+    \item Dataset release (with appropriate licenses)
+    \item Pre-trained model checkpoints
+    \item Configuration files for all experiments
+\end{itemize}
+
+\subsection{Documentation}
+
+\begin{itemize}
+    \item Detailed README with setup instructions
+    \item API documentation
+    \item Tutorial notebooks
+    \item Experiment reproduction scripts
+\end{itemize}
+
+\section{Summary}
+
+This chapter described the comprehensive experimental setup, including datasets, baselines, metrics, and experimental procedures. The next chapter presents the experimental results.

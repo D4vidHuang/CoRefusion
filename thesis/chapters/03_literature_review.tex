@@ -1,0 +1,167 @@
+\chapter{Literature Review}
+
+This chapter surveys existing work related to automated code refactoring, code analysis with machine learning, and the application of generative models to software engineering tasks.
+
+\section{Traditional Approaches to Refactoring}
+
+\subsection{Rule-based Systems}
+
+% TODO: Add relevant citations
+
+Early approaches to automated refactoring relied on predefined rules and heuristics to identify refactoring opportunities. These systems analyze code structure and metrics to detect patterns indicating potential improvements.
+
+\subsection{Static Analysis Tools}
+
+Static analysis tools examine code without executing it, identifying potential issues through pattern matching and metric calculation. Common tools include:
+
+\begin{itemize}
+    \item PMD
+    \item Checkstyle
+    \item SonarQube
+    \item FindBugs/SpotBugs
+\end{itemize}
+
+\subsection{Limitations of Traditional Approaches}
+
+Traditional methods face several limitations:
+\begin{itemize}
+    \item High false positive rates
+    \item Limited semantic understanding
+    \item Difficulty handling context-dependent patterns
+    \item Language-specific implementations
+\end{itemize}
+
+\section{Machine Learning for Code Analysis}
+
+\subsection{Early ML Approaches}
+
+Initial machine learning approaches to code analysis used traditional models (e.g., decision trees, SVMs) with handcrafted features extracted from code metrics and structure.
+
+\subsection{Deep Learning for Code}
+
+\subsubsection{Recurrent Neural Networks}
+
+RNNs and LSTMs were among the first deep learning models applied to code, treating code as sequences of tokens.
+
+\subsubsection{Convolutional Neural Networks}
+
+CNNs have been used to capture local patterns in code, particularly for classification tasks.
+
+\subsubsection{Graph Neural Networks}
+
+GNNs leverage the graph structure of code representations (ASTs, CFGs) to capture complex relationships.
+
+\subsection{Transfer Learning}
+
+Pre-trained models have shown significant improvements by leveraging large-scale code corpora for initial training.
+
+\section{Large Language Models for Code}
+
+\subsection{Code Understanding}
+
+% TODO: Add specific paper citations
+
+LLMs have demonstrated strong capabilities in various code understanding tasks:
+\begin{itemize}
+    \item Code classification
+    \item Bug detection
+    \item Code summarization
+    \item Vulnerability detection
+\end{itemize}
+
+\subsection{Code Generation}
+
+Recent models excel at generating code from natural language descriptions or completing partial code snippets.
+
+\subsection{Code Translation}
+
+LLMs can translate code between programming languages, demonstrating deep understanding of language semantics.
+
+\section{Automated Refactoring with ML}
+
+\subsection{Refactoring Recommendation}
+
+Machine learning approaches to recommend refactoring operations:
+\begin{itemize}
+    \item Learning from historical refactoring patterns
+    \item Predicting developer actions
+    \item Ranking refactoring opportunities
+\end{itemize}
+
+\subsection{Code Smell Detection}
+
+ML-based approaches to identifying code smells have shown improvements over rule-based methods.
+
+\subsection{Refactoring Impact Prediction}
+
+Predicting the impact of refactoring operations on code quality and maintainability.
+
+\section{Generative Models in Software Engineering}
+
+\subsection{Variational Autoencoders (VAEs)}
+
+VAEs have been applied to code generation and program synthesis tasks.
+
+\subsection{Generative Adversarial Networks (GANs)}
+
+Limited application of GANs to code due to challenges with discrete data.
+
+\subsection{Diffusion Models}
+
+Recent work on applying diffusion models to text and code generation:
+\begin{itemize}
+    \item Text generation with discrete diffusion
+    \item Code infilling and completion
+    \item Constrained generation
+\end{itemize}
+
+\section{Code Localization Tasks}
+
+\subsection{Bug Localization}
+
+Identifying the location of bugs in source code has similarities to refactoring localization.
+
+\subsection{Change Impact Analysis}
+
+Predicting which parts of code are affected by changes.
+
+\subsection{Test Case Localization}
+
+Identifying relevant code for test case generation.
+
+\section{Evaluation Methodologies}
+
+\subsection{Benchmark Datasets}
+
+Common datasets for code analysis research:
+\begin{itemize}
+    \item CodeSearchNet
+    \item GitHub repositories
+    \item RefactoringMiner datasets
+    \item Defects4J
+\end{itemize}
+
+\subsection{Evaluation Protocols}
+
+Standard evaluation practices in code analysis research:
+\begin{itemize}
+    \item Cross-validation
+    \item Temporal splits
+    \item Cross-project evaluation
+\end{itemize}
+
+\section{Research Gaps}
+
+Based on the literature review, several gaps are identified:
+
+\begin{enumerate}
+    \item \textbf{Limited generative approaches:} Most work focuses on discriminative models
+    \item \textbf{Lack of context modeling:} Insufficient consideration of project-wide context
+    \item \textbf{Single-language focus:} Limited cross-language generalization
+    \item \textbf{Binary decisions:} Few approaches provide fine-grained localization
+    \item \textbf{Diffusion models unexplored:} Potential of diffusion models for code refactoring remains largely unexplored
+\end{enumerate}
+
+\section{Summary}
+
+This chapter reviewed existing work in automated refactoring, machine learning for code analysis, and generative models for software engineering. The identified gaps motivate the proposed approach, which combines diffusion models with LLMs to address limitations of existing methods.

@@ -1,0 +1,144 @@
+\chapter{Background}
+
+This chapter provides the foundational knowledge necessary to understand the proposed approach, covering code refactoring concepts, diffusion models, and Large Language Models.
+
+\section{Code Refactoring}
+
+\subsection{Definition and Purpose}
+
+% TODO: Expand on refactoring concepts
+
+Code refactoring is the process of improving the internal structure of code without altering its external behavior \citep{fowler1999refactoring}. The primary goals include:
+
+\begin{itemize}
+    \item Improving code readability
+    \item Reducing code complexity
+    \item Enhancing maintainability
+    \item Facilitating future modifications
+    \item Eliminating code smells
+\end{itemize}
+
+\subsection{Common Refactoring Patterns}
+
+Common refactoring operations include:
+
+\begin{itemize}
+    \item \textbf{Extract Method:} Breaking down long methods into smaller, focused functions
+    \item \textbf{Rename Variable:} Improving naming for better clarity
+    \item \textbf{Move Method:} Relocating methods to more appropriate classes
+    \item \textbf{Extract Class:} Splitting classes with too many responsibilities
+    \item \textbf{Inline Method:} Removing unnecessary indirection
+\end{itemize}
+
+\subsection{Code Smells}
+
+Code smells are indicators of potential problems in code that may benefit from refactoring:
+
+\begin{itemize}
+    \item Long methods
+    \item Large classes
+    \item Duplicate code
+    \item Feature envy
+    \item Data clumps
+\end{itemize}
+
+\section{Large Language Models (LLMs)}
+
+\subsection{Transformer Architecture}
+
+% TODO: Include architecture diagram
+
+Large Language Models are based on the Transformer architecture \citep{vaswani2017attention}, which uses self-attention mechanisms to process sequential data.
+
+\subsection{Pre-training and Fine-tuning}
+
+LLMs are typically trained in two stages:
+\begin{enumerate}
+    \item \textbf{Pre-training:} Learning general language patterns from large corpora
+    \item \textbf{Fine-tuning:} Adapting to specific downstream tasks
+\end{enumerate}
+
+\subsection{Code-specific LLMs}
+
+Recent models specifically designed for code understanding include:
+\begin{itemize}
+    \item CodeBERT \citep{feng2020codebert}
+    \item GPT-Codex \citep{chen2021evaluating}
+    \item CodeT5 \citep{wang2021codet5}
+    \item StarCoder \citep{li2023starcoder}
+\end{itemize}
+
+\section{Diffusion Models}
+
+\subsection{Fundamentals}
+
+Diffusion models are a class of generative models that learn to generate data by reversing a gradual noising process \citep{ho2020denoising}.
+
+\subsubsection{Forward Process}
+
+The forward process gradually adds noise to the data:
+\begin{equation}
+    q(x_t | x_{t-1}) = \mathcal{N}(x_t; \sqrt{1-\beta_t}x_{t-1}, \beta_t I)
+\end{equation}
+
+\subsubsection{Reverse Process}
+
+The reverse process learns to denoise:
+\begin{equation}
+    p_\theta(x_{t-1} | x_t) = \mathcal{N}(x_{t-1}; \mu_\theta(x_t, t), \Sigma_\theta(x_t, t))
+\end{equation}
+
+\subsection{Applications to Discrete Data}
+
+While originally designed for continuous data, recent work has adapted diffusion models for discrete data like text and code \citep{austin2021structured}.
+
+\subsection{Conditional Generation}
+
+Diffusion models can be conditioned on various inputs to guide the generation process, enabling controlled generation.
+
+\section{Code Representation}
+
+\subsection{Abstract Syntax Trees (AST)}
+
+ASTs provide a structured representation of source code that captures syntactic information.
+
+\subsection{Code Embeddings}
+
+Modern approaches learn dense vector representations of code that capture semantic information.
+
+\subsection{Graph-based Representations}
+
+Code can be represented as graphs (e.g., control flow graphs, data flow graphs) to capture program structure and dependencies.
+
+\section{Evaluation Metrics}
+
+\subsection{Classification Metrics}
+
+For localization tasks, standard metrics include:
+\begin{itemize}
+    \item Precision
+    \item Recall
+    \item F1-score
+    \item Accuracy
+\end{itemize}
+
+\subsection{Ranking Metrics}
+
+For ranking refactoring priorities:
+\begin{itemize}
+    \item Mean Average Precision (MAP)
+    \item Normalized Discounted Cumulative Gain (NDCG)
+\end{itemize}
+
+\subsection{Code-specific Metrics}
+
+Additional metrics relevant to code analysis:
+\begin{itemize}
+    \item Line-level accuracy
+    \item Method-level accuracy
+    \item Class-level accuracy
+\end{itemize}
+
+\section{Summary}
+
+This chapter provided the necessary background on code refactoring, Large Language Models, diffusion models, and evaluation metrics. The next chapter reviews related work in automated code refactoring and analysis.
