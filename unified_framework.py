@@ -1,19 +1,24 @@
 import torch
 import sys
 import os
-from transformers import AutoTokenizer, AutoModelForCausalLM, AutoModel, pipeline
+# Add external_repos/LLaDA to path for generate import
+llada_path = os.path.join(os.path.dirname(__file__), 'external_repos', 'LLaDA')
+if os.path.exists(llada_path) and llada_path not in sys.path:
+    sys.path.append(llada_path)
+
 try:
     from vllm import LLM, SamplingParams
 except ImportError:
     LLM = None
     SamplingParams = None
 
-# Add external_repos/LLaDA to path for generate import if needed
-sys.path.append(os.path.join(os.path.dirname(__file__), 'external_repos', 'LLaDA'))
+llada_generate = None
 try:
-    from generate import generate as llada_generate
-except ImportError:
-    llada_generate = None
+    # Attempt to import generate from LLaDA
+    import generate as llada_gen_mod
+    llada_generate = llada_gen_mod.generate
+except (ImportError, AttributeError):
+    pass
 
 class BaseModel:
     def __init__(self, model_id):
@@ -34,6 +39,8 @@ class MistralModel(BaseModel):
         self.model = LLM(model=self.model_id, tokenizer_mode="mistral", config_format="mistral", load_format="mistral")
 
     def generate(self, prompt, **kwargs):
+        if self.model is None:
+            raise RuntimeError("Model not loaded. Did you call .load()?")
         sampling_params = SamplingParams(max_tokens=kwargs.get('max_tokens', 8192))
         messages = [{"role": "user", "content": prompt}]
         outputs = self.model.chat(messages, sampling_params=sampling_params)
@@ -46,7 +53,12 @@ class DeepSeekModel(BaseModel):
 
     def generate(self, prompt, **kwargs):
         inputs = self.tokenizer(prompt, return_tensors="pt").to(self.model.device)
-        outputs = self.model.generate(**inputs, max_length=kwargs.get('max_length', 128))
+        # use_cache=False often fixes the 'DynamicCache object has no attribute seen_tokens' error
+        outputs = self.model.generate(
+            **inputs, 
+            max_length=kwargs.get('max_length', 128),
+            use_cache=kwargs.get('use_cache', False)
+        )
         return self.tokenizer.decode(outputs[0], skip_special_tokens=True)[len(prompt):]
 
 class DiffuCoderModel(BaseModel):
@@ -70,7 +82,14 @@ class DiffuCoderModel(BaseModel):
             alg="entropy",
             alg_temp=0.,
         )
-        generations = [self.tokenizer.decode(g[len(p):].tolist()) for p, g in zip(input_ids, output.sequences)]
+        
+        # Handle cases where output is a Tensor or a dict-like object
+        if hasattr(output, "sequences"):
+            seqs = output.sequences
+        else:
+            seqs = output
+
+        generations = [self.tokenizer.decode(g[len(p):].tolist()) for p, g in zip(input_ids, seqs)]
         return generations[0].split('<|dlm_pad|>')[0]
 
 class LLaDAModel(BaseModel):
@@ -103,12 +122,17 @@ class LlamaModel(BaseModel):
         )
 
     def generate(self, prompt, **kwargs):
-        messages = [
-            {"role": "system", "content": kwargs.get('system_prompt', "You are a helpful assistant.")},
-            {"role": "user", "content": prompt},
-        ]
-        outputs = self.pipeline(messages, max_new_tokens=kwargs.get('max_new_tokens', 256))
-        return outputs[0]["generated_text"][-1]['content']
+        try:
+            messages = [
+                {"role": "system", "content": kwargs.get('system_prompt', "You are a helpful assistant.")},
+                {"role": "user", "content": prompt},
+            ]
+            outputs = self.pipeline(messages, max_new_tokens=kwargs.get('max_new_tokens', 256))
+            return outputs[0]["generated_text"][-1]['content']
+        except Exception as e:
+            if "gated repo" in str(e):
+                return "Error: This model is gated. Please login using `huggingface-cli login` with a token that has access to Llama 3."
+            raise e
 
 class QwenModel(BaseModel):
     def load(self):
@@ -147,7 +171,14 @@ class DreamCoderModel(BaseModel):
             alg="entropy",
             alg_temp=0.,
         )
-        generations = [self.tokenizer.decode(g[len(p):].tolist()) for p, g in zip(input_ids, output.sequences)]
+        
+        # Handle cases where output is a Tensor or a dict-like object
+        if hasattr(output, "sequences"):
+            seqs = output.sequences
+        else:
+            seqs = output
+
+        generations = [self.tokenizer.decode(g[len(p):].tolist()) for p, g in zip(input_ids, seqs)]
         return generations[0].split(self.tokenizer.eos_token)[0]
 
 MODEL_REGISTRY = {
