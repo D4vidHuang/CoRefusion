@@ -1,0 +1,201 @@
+import torch
+import sys
+import os
+from transformers import AutoTokenizer, AutoModelForCausalLM, AutoModel, pipeline
+try:
+    from vllm import LLM, SamplingParams
+except ImportError:
+    LLM = None
+    SamplingParams = None
+
+# Add external_repos/LLaDA to path for generate import if needed
+sys.path.append(os.path.join(os.path.dirname(__file__), 'external_repos', 'LLaDA'))
+try:
+    from generate import generate as llada_generate
+except ImportError:
+    llada_generate = None
+
+class BaseModel:
+    def __init__(self, model_id):
+        self.model_id = model_id
+        self.model = None
+        self.tokenizer = None
+
+    def load(self):
+        raise NotImplementedError
+
+    def generate(self, prompt, **kwargs):
+        raise NotImplementedError
+
+class MistralModel(BaseModel):
+    def load(self):
+        if LLM is None:
+            raise ImportError("vllm is not installed")
+        self.model = LLM(model=self.model_id, tokenizer_mode="mistral", config_format="mistral", load_format="mistral")
+
+    def generate(self, prompt, **kwargs):
+        sampling_params = SamplingParams(max_tokens=kwargs.get('max_tokens', 8192))
+        messages = [{"role": "user", "content": prompt}]
+        outputs = self.model.chat(messages, sampling_params=sampling_params)
+        return outputs[0].outputs[0].text
+
+class DeepSeekModel(BaseModel):
+    def load(self):
+        self.tokenizer = AutoTokenizer.from_pretrained(self.model_id, trust_remote_code=True)
+        self.model = AutoModelForCausalLM.from_pretrained(self.model_id, trust_remote_code=True, torch_dtype=torch.bfloat16).cuda()
+
+    def generate(self, prompt, **kwargs):
+        inputs = self.tokenizer(prompt, return_tensors="pt").to(self.model.device)
+        outputs = self.model.generate(**inputs, max_length=kwargs.get('max_length', 128))
+        return self.tokenizer.decode(outputs[0], skip_special_tokens=True)[len(prompt):]
+
+class DiffuCoderModel(BaseModel):
+    def load(self):
+        self.model = AutoModel.from_pretrained(self.model_id, torch_dtype=torch.bfloat16, trust_remote_code=True).to("cuda").eval()
+        self.tokenizer = AutoTokenizer.from_pretrained(self.model_id, trust_remote_code=True)
+
+    def generate(self, prompt, **kwargs):
+        full_prompt = f"<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\n{prompt.strip()}\n<|im_end|>\n<|im_start|>assistant\n"
+        inputs = self.tokenizer(full_prompt, return_tensors="pt")
+        input_ids = inputs.input_ids.to(device="cuda")
+        attention_mask = inputs.attention_mask.to(device="cuda")
+
+        output = self.model.diffusion_generate(
+            input_ids,
+            attention_mask=attention_mask,
+            max_new_tokens=kwargs.get('max_new_tokens', 256),
+            steps=kwargs.get('steps', 256),
+            temperature=kwargs.get('temperature', 0.3),
+            top_p=0.95,
+            alg="entropy",
+            alg_temp=0.,
+        )
+        generations = [self.tokenizer.decode(g[len(p):].tolist()) for p, g in zip(input_ids, output.sequences)]
+        return generations[0].split('<|dlm_pad|>')[0]
+
+class LLaDAModel(BaseModel):
+    def load(self):
+        self.model = AutoModel.from_pretrained(self.model_id, trust_remote_code=True, torch_dtype=torch.bfloat16).to('cuda').eval()
+        self.tokenizer = AutoTokenizer.from_pretrained(self.model_id, trust_remote_code=True)
+
+    def generate(self, prompt, **kwargs):
+        if llada_generate is None:
+            raise ImportError("Could not import generate from LLaDA repo")
+        m = [{"role": "user", "content": prompt}]
+        user_input = self.tokenizer.apply_chat_template(m, add_generation_prompt=True, tokenize=False)
+        input_ids = self.tokenizer(user_input)['input_ids']
+        input_ids = torch.tensor(input_ids).to('cuda').unsqueeze(0)
+        
+        gen_length = kwargs.get('gen_length', 128)
+        steps = kwargs.get('steps', 128)
+        
+        out = llada_generate(self.model, input_ids, steps=steps, gen_length=gen_length, block_length=32, temperature=0., cfg_scale=0., remasking='low_confidence')
+        answer = self.tokenizer.batch_decode(out[:, input_ids.shape[1]:], skip_special_tokens=True)[0]
+        return answer
+
+class LlamaModel(BaseModel):
+    def load(self):
+        self.pipeline = pipeline(
+            "text-generation",
+            model=self.model_id,
+            model_kwargs={"torch_dtype": torch.bfloat16},
+            device_map="auto",
+        )
+
+    def generate(self, prompt, **kwargs):
+        messages = [
+            {"role": "system", "content": kwargs.get('system_prompt', "You are a helpful assistant.")},
+            {"role": "user", "content": prompt},
+        ]
+        outputs = self.pipeline(messages, max_new_tokens=kwargs.get('max_new_tokens', 256))
+        return outputs[0]["generated_text"][-1]['content']
+
+class QwenModel(BaseModel):
+    def load(self):
+        self.model = AutoModelForCausalLM.from_pretrained(self.model_id, torch_dtype="auto", device_map="auto")
+        self.tokenizer = AutoTokenizer.from_pretrained(self.model_id)
+
+    def generate(self, prompt, **kwargs):
+        messages = [
+            {"role": "system", "content": "You are Qwen, created by Alibaba Cloud. You are a helpful assistant."},
+            {"role": "user", "content": prompt}
+        ]
+        text = self.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+        model_inputs = self.tokenizer([text], return_tensors="pt").to(self.model.device)
+        generated_ids = self.model.generate(**model_inputs, max_new_tokens=kwargs.get('max_new_tokens', 512))
+        generated_ids = [output_ids[len(input_ids):] for input_ids, output_ids in zip(model_inputs.input_ids, generated_ids)]
+        return self.tokenizer.batch_decode(generated_ids, skip_special_tokens=True)[0]
+
+class DreamCoderModel(BaseModel):
+    def load(self):
+        self.model = AutoModel.from_pretrained(self.model_id, torch_dtype=torch.bfloat16, trust_remote_code=True).to("cuda").eval()
+        self.tokenizer = AutoTokenizer.from_pretrained(self.model_id, trust_remote_code=True)
+
+    def generate(self, prompt, **kwargs):
+        messages = [{"role": "user", "content": prompt}]
+        inputs = self.tokenizer.apply_chat_template(messages, return_tensors="pt", return_dict=True, add_generation_prompt=True)
+        input_ids = inputs.input_ids.to(device="cuda")
+        attention_mask = inputs.attention_mask.to(device="cuda")
+
+        output = self.model.diffusion_generate(
+            input_ids,
+            attention_mask=attention_mask,
+            max_new_tokens=kwargs.get('max_new_tokens', 768),
+            steps=kwargs.get('steps', 768),
+            temperature=kwargs.get('temperature', 0.1),
+            top_p=0.95,
+            alg="entropy",
+            alg_temp=0.,
+        )
+        generations = [self.tokenizer.decode(g[len(p):].tolist()) for p, g in zip(input_ids, output.sequences)]
+        return generations[0].split(self.tokenizer.eos_token)[0]
+
+MODEL_REGISTRY = {
+    "mistral": {"class": MistralModel, "id": "mistralai/Ministral-8B-Instruct-2410"},
+    "deepseek": {"class": DeepSeekModel, "id": "deepseek-ai/DeepSeek-Coder-V2-Lite-Base"},
+    "diffucoder": {"class": DiffuCoderModel, "id": "apple/DiffuCoder-7B-Instruct"},
+    "llada": {"class": LLaDAModel, "id": "GSAI-ML/LLaDA-8B-Instruct"},
+    "llama": {"class": LlamaModel, "id": "meta-llama/Meta-Llama-3.1-8B-Instruct"},
+    "qwen": {"class": QwenModel, "id": "Qwen/Qwen2.5-Coder-7B-Instruct"},
+    "dreamcoder": {"class": DreamCoderModel, "id": "Dream-org/Dream-Coder-v0-Instruct-7B"},
+}
+
+def run_model(model_key, prompt, **kwargs):
+    if model_key not in MODEL_REGISTRY:
+        print(f"Model {model_key} not found. Available: {list(MODEL_REGISTRY.keys())}")
+        return
+
+    config = MODEL_REGISTRY[model_key]
+    model_instance = config["class"](config["id"])
+    print(f"Loading {model_key}...")
+    model_instance.load()
+    print(f"Generating with {model_key}...")
+    response = model_instance.generate(prompt, **kwargs)
+    return response
+
+if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.prog = "python unified_framework.py"
+    parser.add_argument("--model", type=str, required=True, help="Model name or 'all'")
+    parser.add_argument("--prompt", type=str, required=True)
+    args = parser.parse_args()
+
+    models_to_run = list(MODEL_REGISTRY.keys()) if args.model == "all" else [args.model]
+
+    for model_key in models_to_run:
+        print(f"\n{'='*20} RUNNING {model_key.upper()} {'='*20}")
+        try:
+            result = run_model(model_key, args.prompt)
+            print("\n" + "-"*10 + " RESPONSE " + "-"*10)
+            print(result)
+        except Exception as e:
+            print(f"Error running {model_key}: {e}")
+        finally:
+            import gc
+            # Cleanup efforts to prevent OOM when running multiple models
+            if 'result' in locals(): del result
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            gc.collect()
+        print("="*50)

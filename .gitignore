@@ -1,0 +1,2 @@
+# Ignore subdirectories in external_repos
+external_repos/*/
