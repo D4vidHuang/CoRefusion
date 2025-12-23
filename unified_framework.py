@@ -1,6 +1,7 @@
 import torch
 import sys
 import os
+from transformers import AutoTokenizer, AutoModelForCausalLM, AutoModel, pipeline
 # Add external_repos/LLaDA to path for generate import
 llada_path = os.path.join(os.path.dirname(__file__), 'external_repos', 'LLaDA')
 if os.path.exists(llada_path) and llada_path not in sys.path:
