@@ -20,16 +20,15 @@ def main():
     # 2. 读取数据
     print(f"正在读取数据: {input_file} ...")
     try:
-        # 如果 CSV 没有列名，请根据实际情况调整 (例如 header=None, names=['X', 'y'])
-        df = pd.read_csv(input_file)
+        # 该 CSV 文件似乎没有列名，第一列是索引，第二列是 X，第三列是 y
+        df = pd.read_csv(input_file, header=None, names=['id', 'X', 'y'])
     except Exception as e:
         print(f"读取 CSV 失败: {e}")
         return
 
-    # 检查列名
+    # 检查列名 (现在已经通过 names 指定了)
     if 'X' not in df.columns or 'y' not in df.columns:
-        print("错误: CSV 文件中未找到 'X' 或 'y' 列。")
-        print(f"当前列名: {df.columns.tolist()}")
+        print("错误: CSV 处理逻辑异常，未定义 'X' 或 'y'。")
         return
 
     # 3. 初始化模型 (参考 dreamcoder 调用方式)
