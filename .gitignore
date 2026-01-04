@@ -1,2 +1,3 @@
 # Ignore subdirectories in external_repos
 external_repos/*/
+.DS_Store
