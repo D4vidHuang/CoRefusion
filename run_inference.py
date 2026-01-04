@@ -51,16 +51,25 @@ def main():
         print(f"[{index + 1}/{len(df)}] 正在处理 (不使用 Chat Template)...")
         
         try:
+            # 1. 替换噪声占位符为模型识别的特殊 Token: <|mask|>
+            x_val_processed = x_val.replace('[MASK]', '<|mask|>')
+
             # --- 核心修改：原始 Tokenize，不添加对话装饰 ---
-            inputs = tokenizer(x_val, return_tensors="pt")
+            inputs = tokenizer(x_val_processed, return_tensors="pt")
             input_ids = inputs.input_ids.to(device="cuda")
             attention_mask = inputs.attention_mask.to(device="cuda")
 
-            # 直接调用底层 diffusion_generate
+            # 打印调试信息：确认是否包含 Mask ID (151666)
+            mask_id = tokenizer.mask_token_id
+            if mask_id in input_ids:
+                print(f"成功识别到噪声 Token <|mask|> (ID: {mask_id})")
+
+            # 2. 直接调用底层 diffusion_generate
+            # 设置 max_new_tokens=0 以便只专注于修复输入内部的 [MASK] 噪声
             output = raw_model.diffusion_generate(
                 input_ids,
                 attention_mask=attention_mask,
-                max_new_tokens=128, # 对于去噪任务，通常不需要产生太多新 token
+                max_new_tokens=0, 
                 steps=768,
                 temperature=0.1,
                 top_p=0.95,
