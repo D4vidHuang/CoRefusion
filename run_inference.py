@@ -65,11 +65,12 @@ def main():
                 print(f"成功识别到噪声 Token <|mask|> (ID: {mask_id})")
 
             # 2. 直接调用底层 diffusion_generate
-            # 设置 max_new_tokens=0 以便只专注于修复输入内部的 [MASK] 噪声
+            # 设置 max_new_tokens=1 以避开 transformers 的 strict 校验
+            # 虽然会多生成一个 token，但主要目的（修复内部 MASK）不受影响
             output = raw_model.diffusion_generate(
                 input_ids,
                 attention_mask=attention_mask,
-                max_new_tokens=0, 
+                max_new_tokens=1, 
                 steps=768,
                 temperature=0.1,
                 top_p=0.95,
