@@ -2,3 +2,4 @@
 external_repos/*/
 .DS_Store
 __pycache__
+results/
