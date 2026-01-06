@@ -56,7 +56,7 @@ def run_refactor_showcase(code_snippet):
     attention_mask = inputs.attention_mask
     
     # Identify Noise
-    entropy = calculate_token_entropy(model, input_ids, attention_mask)
+    entropy = calculate_token_entropy(model, input_ids, attention_mask.bool())
     mask_indices = identify_bad_names(entropy)
     
     masked_input_ids = input_ids.clone()
@@ -74,7 +74,7 @@ def run_refactor_showcase(code_snippet):
         # Fill the masks
         refactored_ids = model.diffusion_generate(
             masked_input_ids,
-            attention_mask=attention_mask,
+            attention_mask=attention_mask.bool(),
             steps=128,
             temperature=0.1,
             top_p=0.95,

@@ -3,6 +3,8 @@ import os
 import torch
 import torch.nn.functional as F
 import numpy as np
+from datetime import datetime
+from huggingface_hub import HfApi
 
 # 1. FORCE MOCK torchvision BEFORE ANYTHING ELSE
 class MockModule:
@@ -55,9 +57,18 @@ def add_gumbel_noise(logits, temperature):
     gumbel_noise = (- torch.log(noise)) ** temperature
     return logits.exp() / gumbel_noise
 
-def run_step_by_step_refactor(code_snippet, total_steps=50, output_every=5):
+def run_step_by_step_refactor(code_snippet, total_steps=20, output_every=5):
+    # Setup logging
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    log_filename = f"dreamcoder_sbs_{timestamp}.txt"
+    log_file = open(log_filename, "w", encoding="utf-8")
+    
+    def log_and_print(msg):
+        print(msg)
+        log_file.write(msg + "\n")
+
     model_id = "Dream-org/Dream-Coder-v0-Instruct-7B"
-    print(f"Loading {model_id}...")
+    log_and_print(f"Loading {model_id}...")
     
     tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
     model = AutoModel.from_pretrained(model_id, torch_dtype=torch.bfloat16, trust_remote_code=True).to("cuda").eval()
@@ -67,7 +78,7 @@ def run_step_by_step_refactor(code_snippet, total_steps=50, output_every=5):
     attention_mask = inputs.attention_mask
     
     # Identify Noise
-    entropy = calculate_token_entropy(model, input_ids, attention_mask)
+    entropy = calculate_token_entropy(model, input_ids, attention_mask.bool())
     mask_indices = identify_bad_names(entropy)
     
     x = input_ids.clone()
@@ -77,9 +88,9 @@ def run_step_by_step_refactor(code_snippet, total_steps=50, output_every=5):
     for idx in mask_indices:
         x[0, idx] = mask_token_id
 
-    print("\nInitial Masked Code:")
-    print(tokenizer.decode(x[0], skip_special_tokens=False))
-    print("-" * 30)
+    log_and_print("\nInitial Masked Code:")
+    log_and_print(tokenizer.decode(x[0], skip_special_tokens=False))
+    log_and_print("-" * 30)
 
     # Diffusion Loop (Adapted from LLaDA)
     initial_mask_index = (x == mask_token_id)
@@ -92,7 +103,7 @@ def run_step_by_step_refactor(code_snippet, total_steps=50, output_every=5):
             current_mask_index = (x == mask_token_id)
             
             # Predict
-            logits = model(x, attention_mask=attention_mask).logits
+            logits = model(x, attention_mask=attention_mask.bool()).logits
             
             # Sample
             logits_with_noise = add_gumbel_noise(logits, temperature=temperature)
@@ -118,12 +129,32 @@ def run_step_by_step_refactor(code_snippet, total_steps=50, output_every=5):
             # Visualization
             if (i + 1) % output_every == 0 or (i + 1) == total_steps:
                 current_code = tokenizer.decode(x[0], skip_special_tokens=True)
-                print(f"Step {i+1}/{total_steps}:")
-                print(current_code.strip())
-                print("-" * 20)
+                log_and_print(f"Step {i+1}/{total_steps}:")
+                log_and_print(current_code.strip())
+                log_and_print("-" * 20)
 
-    print("\nFinal Refactored Code:")
-    print(tokenizer.decode(x[0], skip_special_tokens=True).strip())
+    final_code = tokenizer.decode(x[0], skip_special_tokens=True).strip()
+    log_and_print("\nFinal Refactored Code:")
+    log_and_print(final_code)
+    
+    log_file.close()
+
+    # Upload to Hugging Face
+    repo_id = "D4vidHuang/Denoising_SBS_DreamCoder"
+    hf_token = ""
+    print(f"\nUploading {log_filename} to Hugging Face: {repo_id}...")
+    try:
+        api = HfApi()
+        api.upload_file(
+            path_or_fileobj=log_filename,
+            path_in_repo=log_filename,
+            repo_id=repo_id,
+            repo_type="dataset", # Assuming it's a dataset repo, change if it's a model repo
+            token=hf_token
+        )
+        print("Upload successful!")
+    except Exception as e:
+        print(f"Upload failed: {e}")
 
 if __name__ == "__main__":
     bad_code = """
