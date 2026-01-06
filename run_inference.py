@@ -69,32 +69,42 @@ def main():
                     
                     llada_generate_func = llada_generate
 
-                    # 获取 mask token 的字符串表示
-                    # LLaDA 官方 tokenizer 126336 可能对应 '[MASK]'
-                    # 我们先处理输入文本
+                    # LLaDA 官方 generate 会在 prompt 后面拼接 gen_length 个 mask。
+                    # 如果我们要填充 prompt 内部已有的 [MASK]，需要注意 generate 函数的设计。
+                    # 我们将输入文本中的 [MASK] 替换为 mask_id，并设置 gen_length=0。
+                    # 为了避免 "modulo by zero"，我们需要确保 block_length 和 steps 的设置合法。
+                    # 但官方代码中 gen_length // block_length 如果 gen_length 为 0 会导致后续计算问题。
+                    # 解决方法：我们把带有 internal mask 的 prompt 作为输入，并设置 gen_length 为一个极小值(如 1)或者保持原样但只取前面的部分。
+                    # 更好地，我们可以直接设置 gen_length=block_length=steps=128 (或数据需要的长度)
+                    
                     input_text = x_val.replace('[MASK]', tokenizer.decode([mask_id]))
                     inputs = tokenizer(input_text, return_tensors="pt")
                     input_ids = inputs.input_ids.to(raw_model.device)
                     attention_mask = inputs.attention_mask.to(raw_model.device)
 
-                    # 确保 input_ids 中的 mask 部分确实是 mask_id
-                    # 有些 tokenizer 可能会把 [MASK] 拆分，如果发生这种情况，我们需要手动修正
-                    # 这里尝试一个简单的启发式：如果 tokenizer 没把 [MASK] 识别为单 token，我们手动干预
                     if mask_id not in input_ids:
-                         # 尝试直接对 [MASK] 字符串进行 tokenization 看看 ID
                          m_ids = tokenizer.encode(tokenizer.decode([mask_id]), add_special_tokens=False)
                          for m_id in m_ids:
                              input_ids[input_ids == m_id] = mask_id
 
+                    # 调用 generate。虽然它会由于 gen_length > 0 在后面加补丁，但它也会处理 input_ids 内部的 mask_id
                     output = llada_generate_func(
                         raw_model, 
                         input_ids, 
                         attention_mask=attention_mask,
                         steps=128, 
-                        gen_length=0, # 设置为 0，因为我们只想填充 prompt 内部已有的 mask
+                        gen_length=1, # 最小生成长度
+                        block_length=1,
                         mask_id=mask_id
                     )
-                    full_out_text = tokenizer.decode(output[0], skip_special_tokens=True)
+                    # 只取原始 input_ids 长度的部分，这样就得到了填充了内部 mask 的结果
+                    full_out_text = tokenizer.decode(output[0][:input_ids.shape[1]], skip_special_tokens=True)
+
+                elif model_key in ['llama', 'mistral', 'qwen']:
+                    # 自回归模型 (Llama, Mistral, Qwen)
+                    # 提示词微调：对于 [MASK] 填充任务，我们需要明确告诉模型
+                    prompt = f"Please fill the [MASK] token in the following text:\n{x_val}"
+                    full_out_text = model_instance.generate(prompt, max_new_tokens=128)
 
                 else:
                     # DiffuCoder 和 DreamCoder 逻辑
