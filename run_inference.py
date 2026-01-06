@@ -25,8 +25,8 @@ def main():
         return
 
     # 3. 待测试的模型列表
-    # 用户要求对比：DiffuCoder, LLADA, DreamCoder 以及自回归模型 Llama, Mistral, Qwen
-    models_to_test = ['diffucoder', 'llada', 'dreamcoder', 'llama', 'mistral', 'qwen']
+    # 用户要求对比：DiffuCoder, LLADA, DreamCoder 以及自回归模型 DeepSeek, Mistral, Qwen
+    models_to_test = ['diffucoder', 'llada', 'dreamcoder', 'deepseek', 'mistral', 'qwen']
     for model_key in models_to_test:
         if model_key not in MODEL_REGISTRY:
             print(f"\n跳过 {model_key}: 不在 MODEL_REGISTRY 中")
@@ -100,10 +100,10 @@ def main():
                     # 只取原始 input_ids 长度的部分，这样就得到了填充了内部 mask 的结果
                     full_out_text = tokenizer.decode(output[0][:input_ids.shape[1]], skip_special_tokens=True)
 
-                elif model_key in ['llama', 'mistral', 'qwen']:
-                    # 自回归模型 (Llama, Mistral, Qwen)
+                elif model_key in ['deepseek', 'mistral', 'qwen']:
+                    # 自回归模型 (DeepSeek, Mistral, Qwen)
                     # 提示词微调：对于 [MASK] 填充任务，我们需要明确告诉模型
-                    prompt = f"Please fill the [MASK] token in the following text:\n{x_val}"
+                    prompt = f"Please give me the [MASK] token in the following text:\n{x_val}"
                     full_out_text = model_instance.generate(prompt, max_new_tokens=128)
 
                 else:

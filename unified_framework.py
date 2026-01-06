@@ -64,13 +64,13 @@ class DeepSeekModel(BaseModel):
 
     def generate(self, prompt, **kwargs):
         inputs = self.tokenizer(prompt, return_tensors="pt").to(self.model.device)
-        # use_cache=False often fixes the 'DynamicCache object has no attribute seen_tokens' error
+        # Use max_new_tokens instead of max_length to avoid error with long inputs
         outputs = self.model.generate(
             **inputs, 
-            max_length=kwargs.get('max_length', 128),
+            max_new_tokens=kwargs.get('max_new_tokens', 128),
             use_cache=kwargs.get('use_cache', False)
         )
-        return self.tokenizer.decode(outputs[0], skip_special_tokens=True)[len(prompt):]
+        return self.tokenizer.decode(outputs[0][inputs.input_ids.shape[1]:], skip_special_tokens=True)
 
 class DiffuCoderModel(BaseModel):
     def load(self):
