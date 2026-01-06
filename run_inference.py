@@ -157,8 +157,6 @@ def main():
 
         # 6. 清理内存，防止 OOM
         del model_instance
-        if 'raw_model' in locals(): del raw_model
-        if 'tokenizer' in locals(): del tokenizer
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
         gc.collect()
