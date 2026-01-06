@@ -226,7 +226,7 @@ def main():
                     path_or_fileobj=output_file,
                     path_in_repo=f"results/{os.path.basename(output_file)}",
                     repo_id=repo_id,
-                    repo_type="dataset", # 默认为 dataset 仓库，如果是 model 请改为 "model"
+                    repo_type="dataset", 
                 )
                 print(f"上传成功！")
             except Exception as upload_err:
