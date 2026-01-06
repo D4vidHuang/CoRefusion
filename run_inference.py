@@ -27,18 +27,20 @@ def main():
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
 
-    # 2. 读取数据 (可以增加 nrows 处理更多数据进行测试)
+    # 2. 读取数据
     print(f"正在读取数据: {input_file} ...")
     try:
-        # 默认读取 5 行进行验证，您可以根据需要调整
-        df = pd.read_csv(input_file, header=None, names=['id', 'X', 'y'], nrows=5)
+        # 移除了 nrows 限制以处理所有数据
+        df = pd.read_csv(input_file, header=None, names=['id', 'X', 'y'])
+        print(f"成功读取 {len(df)} 行数据")
     except Exception as e:
         print(f"读取 CSV 失败: {e}")
         return
 
     # 3. 待测试的模型列表
-    # 用户要求对比：DiffuCoder, LLADA, DreamCoder 以及自回归模型 DeepSeek, Mistral, Qwen
-    models_to_test = ['diffucoder', 'llada', 'dreamcoder', 'deepseek', 'mistral', 'qwen']
+    # 用户要求对比：DiffuCoder, LLADA, DreamCoder 以及自回归模型 DeepSeek, CodeGemma, Qwen
+    models_to_test = ['diffucoder', 'llada', 'dreamcoder', 'deepseek', 'codegemma', 'qwen']
+    
     for model_key in models_to_test:
         if model_key not in MODEL_REGISTRY:
             print(f"\n跳过 {model_key}: 不在 MODEL_REGISTRY 中")
