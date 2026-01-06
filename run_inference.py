@@ -3,11 +3,18 @@ import os
 import torch
 import gc
 import sys
+import time
 from datetime import datetime
 try:
     from huggingface_hub import HfApi
 except ImportError:
     HfApi = None
+try:
+    from tqdm import tqdm
+except ImportError:
+    # If tqdm is not installed, define a simple pass-through
+    def tqdm(iterable, **kwargs):
+        return iterable
 
 # 导入框架中的注册表
 from unified_framework import MODEL_REGISTRY
@@ -51,83 +58,113 @@ def main():
         raw_model = model_instance.model
         tokenizer = model_instance.tokenizer
 
-        # 4. 执行推理
-        results = []
-        print(f"开始为 {model_key} 执行去噪/生成测试...")
+        # 4. 执行推理 (使用 Batch 加速)
+        BATCH_SIZE = 32 # 针对 A100 80GB 可尝试 32 或更高
+        print(f"开始为 {model_key} 执行去噪/生成测试 (Batch Size: {BATCH_SIZE})...")
 
-        for index, row in df.iterrows():
-            x_val = str(row['X'])
-            y_val = str(row['y'])
+        # 确保 tokenizer 有 pad_token
+        if tokenizer.pad_token is None:
+            if tokenizer.eos_token is not None:
+                tokenizer.pad_token = tokenizer.eos_token
+            else:
+                tokenizer.add_special_tokens({'pad_token': '[PAD]'})
+                if hasattr(raw_model, "resize_token_embeddings"):
+                    raw_model.resize_token_embeddings(len(tokenizer)) 
+
+        # 设置 padding side
+        tokenizer.padding_side = 'left'
+
+        total_rows = len(df)
+        import math
+        num_batches = math.ceil(total_rows / BATCH_SIZE)
+        results = []
+
+        # 使用 tqdm 显示进度条
+        for i in tqdm(range(0, total_rows, BATCH_SIZE), desc=f"[{model_key}] Inference", unit="batch"):
+            chunk = df.iloc[i : i+BATCH_SIZE]
+            batch_x = chunk['X'].astype(str).tolist()
+            batch_y = chunk['y'].astype(str).tolist()
+            batch_ids = chunk['id'].tolist()
+            current_batch_idx = (i // BATCH_SIZE) + 1
             
-            print(f"[{model_key}] 正在处理 ({index + 1}/{len(df)})...")
+            print(f"[{model_key}] 正在处理批次 {current_batch_idx}/{num_batches} (Ids: {batch_ids[0]} - {batch_ids[-1]})...")
+            
+            start_time = time.time()
+            batch_outputs = []
             
             try:
                 if model_key == 'llada':
-                    # LLADA 特殊逻辑
-                    # 默认使用 126336 作为 mask_id
                     mask_id = 126336
-                    # 尝试从 unified_framework 获取已导入的 llada_generate
                     from unified_framework import llada_generate
-                    
                     if llada_generate is None:
-                        raise ImportError("无法加载 llada 的 generate 模块，请检查 external_repos/LLaDA 是否完整")
-                    
+                        raise ImportError("无法加载 llada 的 generate 模块")
                     llada_generate_func = llada_generate
 
-                    # LLaDA 官方 generate 会在 prompt 后面拼接 gen_length 个 mask。
-                    # 如果我们要填充 prompt 内部已有的 [MASK]，需要注意 generate 函数的设计。
-                    # 我们将输入文本中的 [MASK] 替换为 mask_id，并设置 gen_length=0。
-                    # 为了避免 "modulo by zero"，我们需要确保 block_length 和 steps 的设置合法。
-                    # 但官方代码中 gen_length // block_length 如果 gen_length 为 0 会导致后续计算问题。
-                    # 解决方法：我们把带有 internal mask 的 prompt 作为输入，并设置 gen_length 为一个极小值(如 1)或者保持原样但只取前面的部分。
-                    # 更好地，我们可以直接设置 gen_length=block_length=steps=128 (或数据需要的长度)
+                    input_texts = [x.replace('[MASK]', tokenizer.decode([mask_id])) for x in batch_x]
                     
-                    input_text = x_val.replace('[MASK]', tokenizer.decode([mask_id]))
-                    inputs = tokenizer(input_text, return_tensors="pt")
+                    inputs = tokenizer(input_texts, return_tensors="pt", padding=True, truncation=True, max_length=512)
                     input_ids = inputs.input_ids.to(raw_model.device)
                     attention_mask = inputs.attention_mask.to(raw_model.device)
+                    
+                    m_ids = tokenizer.encode(tokenizer.decode([mask_id]), add_special_tokens=False)
+                    for m_id in m_ids:
+                        input_ids[input_ids == m_id] = mask_id
 
-                    if mask_id not in input_ids:
-                         m_ids = tokenizer.encode(tokenizer.decode([mask_id]), add_special_tokens=False)
-                         for m_id in m_ids:
-                             input_ids[input_ids == m_id] = mask_id
-
-                    # 调用 generate。虽然它会由于 gen_length > 0 在后面加补丁，但它也会处理 input_ids 内部的 mask_id
                     output = llada_generate_func(
                         raw_model, 
                         input_ids, 
                         attention_mask=attention_mask,
                         steps=128, 
-                        gen_length=1, # 最小生成长度
+                        gen_length=1, 
                         block_length=1,
                         mask_id=mask_id
                     )
-                    # 只取原始 input_ids 长度的部分，这样就得到了填充了内部 mask 的结果
-                    full_out_text = tokenizer.decode(output[0][:input_ids.shape[1]], skip_special_tokens=True)
+                    
+                    processed_ids = output[:, :input_ids.shape[1]]
+                    batch_outputs = tokenizer.batch_decode(processed_ids, skip_special_tokens=True)
 
-                elif model_key in ['deepseek', 'mistral', 'qwen']:
-                    # 自回归模型 (DeepSeek, Mistral, Qwen)
-                    # 提示词微调：对于 [MASK] 填充任务，我们需要明确告诉模型
-                    prompt = f"Please give me the [MASK] token in the following text:\n{x_val}"
-                    full_out_text = model_instance.generate(prompt, max_new_tokens=128)
+                elif model_key in ['deepseek', 'codegemma', 'qwen']:
+                    prompts = [f"Please give me the [MASK] token in the following text:\n{x}" for x in batch_x]
+                    
+                    if model_key == 'codegemma' and hasattr(model_instance.model, 'chat'):
+                        # CodeGemma (vLLM)
+                        from vllm import SamplingParams
+                        sampling_params = SamplingParams(max_tokens=128)
+                        messages_batch = [[{"role": "user", "content": p}] for p in prompts]
+                        outputs = model_instance.model.chat(messages_batch, sampling_params=sampling_params)
+                        batch_outputs = [o.outputs[0].text for o in outputs]
+                    else:
+                        # DeepSeek, Qwen (HF)
+                        if model_key == 'qwen':
+                             msgs_batch = [[
+                                {"role": "system", "content": "You are Qwen, created by Alibaba Cloud. You are a helpful assistant."},
+                                {"role": "user", "content": p}
+                            ] for p in prompts]
+                             text_batch = tokenizer.apply_chat_template(msgs_batch, tokenize=False, add_generation_prompt=True)
+                             inputs = tokenizer(text_batch, return_tensors="pt", padding=True, truncation=True, max_length=1024).to(raw_model.device)
+                        else:
+                             # DeepSeek
+                             inputs = tokenizer(prompts, return_tensors="pt", padding=True, truncation=True, max_length=1024).to(raw_model.device)
+                        
+                        generated_ids = raw_model.generate(**inputs, max_new_tokens=128)
+                        # Remove prompt
+                        new_tokens = generated_ids[:, inputs.input_ids.shape[1]:]
+                        batch_outputs = tokenizer.batch_decode(new_tokens, skip_special_tokens=True)
 
                 else:
-                    # DiffuCoder 和 DreamCoder 逻辑
-                    # 这两个模型通常使用 <|mask|> 作为 mask token
+                    # DiffuCoder / DreamCoder
                     mask_token = '<|mask|>'
-                    x_val_processed = x_val.replace('[MASK]', mask_token)
-
-                    inputs = tokenizer(x_val_processed, return_tensors="pt")
-                    input_ids = inputs.input_ids.to(device=raw_model.device)
-                    attention_mask = inputs.attention_mask.to(device=raw_model.device)
-
-                    # 检查是否包含 Mask ID
+                    input_texts = [x.replace('[MASK]', mask_token) for x in batch_x]
+                    
                     actual_mask_id = tokenizer.convert_tokens_to_ids(mask_token)
-                    if actual_mask_id in input_ids:
-                        print(f"  成功识别到噪声 Token {mask_token} (ID: {actual_mask_id})")
+                    
+                    inputs = tokenizer(input_texts, return_tensors="pt", padding=True, truncation=True, max_length=512)
+                    input_ids = inputs.input_ids.to(raw_model.device)
+                    attention_mask = inputs.attention_mask.to(raw_model.device)
 
-                    # 调用底层 diffusion_generate
-                    # 根据模型设置不同的默认 steps 和 temperature
+                    if i == 0 and actual_mask_id in input_ids:
+                         print(f"  [Batch Check] 成功识别到噪声 Token {mask_token} (ID: {actual_mask_id})")
+
                     gen_steps = 768 if model_key == 'dreamcoder' else 256
                     gen_temp = 0.1 if model_key == 'dreamcoder' else 0.3
                     
@@ -143,17 +180,33 @@ def main():
                     )
                     
                     seqs = output.sequences if hasattr(output, "sequences") else output
-                    full_out_text = tokenizer.decode(seqs[0], skip_special_tokens=True)
+                    batch_outputs = tokenizer.batch_decode(seqs, skip_special_tokens=True)
 
-                results.append({
-                    'id': row['id'],
-                    'X_original': x_val,
-                    'output_full': full_out_text,
-                    'y_ground_truth': y_val
-                })
+                batch_time = time.time() - start_time
+                avg_time = batch_time / len(batch_x)
                 
+                for idx, out_text in enumerate(batch_outputs):
+                    results.append({
+                        'id': batch_ids[idx],
+                        'X_original': batch_x[idx],
+                        'output_full': out_text,
+                        'y_ground_truth': batch_y[idx],
+                        'processing_time_sec': round(avg_time, 4)
+                    })
+
             except Exception as e:
-                print(f"  处理出错: {e}")
+                import traceback
+                print(f"  Batch 处理出错: {e}")
+                # traceback.print_exc()
+                batch_time = time.time() - start_time
+                for idx in range(len(batch_x)):
+                     results.append({
+                        'id': batch_ids[idx],
+                        'X_original': batch_x[idx],
+                        'output_full': f"ERROR: {str(e)}",
+                        'y_ground_truth': batch_y[idx],
+                        'processing_time_sec': round(batch_time / len(batch_x), 4)
+                    })
                 
         # 5. 保存结果
         timestamp = datetime.now().strftime("%m%d_%H%M")
