@@ -102,8 +102,8 @@ def main():
                     x_val_processed = x_val.replace('[MASK]', mask_token)
 
                     inputs = tokenizer(x_val_processed, return_tensors="pt")
-                    input_ids = inputs.input_ids.to(device="cuda")
-                    attention_mask = inputs.attention_mask.to(device="cuda")
+                    input_ids = inputs.input_ids.to(device=raw_model.device)
+                    attention_mask = inputs.attention_mask.to(device=raw_model.device)
 
                     # 检查是否包含 Mask ID
                     actual_mask_id = tokenizer.convert_tokens_to_ids(mask_token)
