@@ -62,33 +62,35 @@ def main():
                     # LLADA 特殊逻辑
                     # 默认使用 126336 作为 mask_id
                     mask_id = 126336
-                    # 将 [MASK] 替换为 LLADA 识别的 mask token id
-                    # LLADA 官方 generate 会在 prompt 后面接 gen_length 个 mask
-                    # 如果要在 prompt 内部填充，需要手动构造 input_ids 并调用 generate
-                    
                     # 尝试从 unified_framework 获取已导入的 llada_generate
                     from unified_framework import llada_generate
                     
                     if llada_generate is None:
-                        # 如果框架里没导入成功，尝试手动处理路径
-                        llada_path = os.path.join(os.path.dirname(__file__), 'external_repos', 'LLaDA')
-                        if os.path.exists(llada_path) and llada_path not in sys.path:
-                            sys.path.append(llada_path)
-                        import generate as llada_gen_mod
-                        llada_generate_func = llada_gen_mod.generate
-                    else:
-                        llada_generate_func = llada_generate
+                        raise ImportError("无法加载 llada 的 generate 模块，请检查 external_repos/LLaDA 是否完整")
+                    
+                    llada_generate_func = llada_generate
 
-                    # 构造包含 mask 的 input_ids
-                    # llada 的 tokenizer.decode([mask_id]) 应该是 [MASK] 或者类似的
-                    # 我们直接用 tokenizer 处理
+                    # 获取 mask token 的字符串表示
+                    # LLaDA 官方 tokenizer 126336 可能对应 '[MASK]'
+                    # 我们先处理输入文本
                     input_text = x_val.replace('[MASK]', tokenizer.decode([mask_id]))
                     inputs = tokenizer(input_text, return_tensors="pt")
-                    input_ids = inputs.input_ids.to('cuda')
-                    
+                    input_ids = inputs.input_ids.to(raw_model.device)
+                    attention_mask = inputs.attention_mask.to(raw_model.device)
+
+                    # 确保 input_ids 中的 mask 部分确实是 mask_id
+                    # 有些 tokenizer 可能会把 [MASK] 拆分，如果发生这种情况，我们需要手动修正
+                    # 这里尝试一个简单的启发式：如果 tokenizer 没把 [MASK] 识别为单 token，我们手动干预
+                    if mask_id not in input_ids:
+                         # 尝试直接对 [MASK] 字符串进行 tokenization 看看 ID
+                         m_ids = tokenizer.encode(tokenizer.decode([mask_id]), add_special_tokens=False)
+                         for m_id in m_ids:
+                             input_ids[input_ids == m_id] = mask_id
+
                     output = llada_generate_func(
                         raw_model, 
                         input_ids, 
+                        attention_mask=attention_mask,
                         steps=128, 
                         gen_length=0, # 设置为 0，因为我们只想填充 prompt 内部已有的 mask
                         mask_id=mask_id
