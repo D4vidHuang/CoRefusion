@@ -43,11 +43,12 @@ class BaseModel:
     def generate(self, prompt, **kwargs):
         raise NotImplementedError
 
-class MistralModel(BaseModel):
+class CodeGemmaModel(BaseModel):
     def load(self):
         if LLM is None:
             raise ImportError("vllm is not installed")
-        self.model = LLM(model=self.model_id, tokenizer_mode="mistral", config_format="mistral", load_format="mistral")
+        # CodeGemma usually works with auto configuration in vLLM
+        self.model = LLM(model=self.model_id)
 
     def generate(self, prompt, **kwargs):
         if self.model is None:
@@ -193,8 +194,8 @@ class DreamCoderModel(BaseModel):
         return generations[0].split(self.tokenizer.eos_token)[0]
 
 MODEL_REGISTRY = {
-    "mistral": {"class": MistralModel, "id": "mistralai/Ministral-8B-Instruct-2410"},
-    "deepseek": {"class": DeepSeekModel, "id": "deepseek-ai/DeepSeek-Coder-V2-Lite-Base"},
+    "codegemma": {"class": CodeGemmaModel, "id": "google/codegemma-7b-it"},
+    "deepseek": {"class": DeepSeekModel, "id": "deepseek-ai/deepseek-coder-6.7b-instruct"},
     "diffucoder": {"class": DiffuCoderModel, "id": "apple/DiffuCoder-7B-Instruct"},
     "llada": {"class": LLaDAModel, "id": "GSAI-ML/LLaDA-8B-Instruct"},
     "llama": {"class": LlamaModel, "id": "meta-llama/Meta-Llama-3.1-8B-Instruct"},
