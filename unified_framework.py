@@ -3,7 +3,8 @@ import sys
 import os
 from transformers import AutoTokenizer, AutoModelForCausalLM, AutoModel, pipeline
 # Add external_repos/LLaDA to path for generate import
-llada_path = os.path.join(os.path.dirname(__file__), 'external_repos', 'LLaDA')
+project_root = os.path.dirname(os.path.abspath(__file__))
+llada_path = os.path.join(project_root, 'external_repos', 'LLaDA')
 if os.path.exists(llada_path) and llada_path not in sys.path:
     sys.path.append(llada_path)
 
@@ -15,10 +16,19 @@ except ImportError:
 
 llada_generate = None
 try:
-    # Attempt to import generate from LLaDA
-    import generate as llada_gen_mod
-    llada_generate = llada_gen_mod.generate
-except (ImportError, AttributeError):
+    import importlib.util
+    gen_path = os.path.join(llada_path, 'generate.py')
+    if os.path.exists(gen_path):
+        spec = importlib.util.spec_from_file_location("llada_generate_mod", gen_path)
+        llada_gen_mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(llada_gen_mod)
+        llada_generate = llada_gen_mod.generate
+    else:
+        # Fallback to simple import if for some reason abspath failed
+        import generate as llada_gen_mod
+        llada_generate = llada_gen_mod.generate
+except Exception as e:
+    print(f"Warning: Failed to import llada_generate: {e}")
     pass
 
 class BaseModel:
