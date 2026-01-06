@@ -25,9 +25,8 @@ def main():
         return
 
     # 3. 待测试的模型列表
-    # 用户明确要求测试 DiffuCoder, LLADA 和 DreamCoder
-    models_to_test = ['diffucoder', 'llada', 'dreamcoder']
-    
+    # 用户要求对比：DiffuCoder, LLADA, DreamCoder 以及自回归模型 Llama, Mistral, Qwen
+    models_to_test = ['diffucoder', 'llada', 'dreamcoder', 'llama', 'mistral', 'qwen']
     for model_key in models_to_test:
         if model_key not in MODEL_REGISTRY:
             print(f"\n跳过 {model_key}: 不在 MODEL_REGISTRY 中")
