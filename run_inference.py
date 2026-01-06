@@ -3,6 +3,11 @@ import os
 import torch
 import gc
 import sys
+from datetime import datetime
+try:
+    from huggingface_hub import HfApi
+except ImportError:
+    HfApi = None
 
 # 导入框架中的注册表
 from unified_framework import MODEL_REGISTRY
@@ -151,9 +156,30 @@ def main():
                 print(f"  处理出错: {e}")
                 
         # 5. 保存结果
-        output_file = os.path.join(output_dir, f'{model_key}_results.csv')
+        timestamp = datetime.now().strftime("%m%d_%H%M")
+        output_file = os.path.join(output_dir, f'{model_key}_{timestamp}.csv')
         pd.DataFrame(results).to_csv(output_file, index=False)
         print(f"\n{model_key} 推理完成！结果已保存至: {output_file}")
+
+        # --- 新增: 自动上传到 Hugging Face ---
+        if HfApi is not None:
+            try:
+                api = HfApi()
+                repo_id = "D4vidHuang/IdentifierRefactoringRes"
+                print(f"正在上传 {output_file} 到 Hugging Face 仓库: {repo_id} ...")
+                api.upload_file(
+                    path_or_fileobj=output_file,
+                    path_in_repo=f"results/{os.path.basename(output_file)}",
+                    repo_id=repo_id,
+                    repo_type="dataset", # 默认为 dataset 仓库，如果是 model 请改为 "model"
+                )
+                print(f"上传成功！")
+            except Exception as upload_err:
+                print(f"上传失败: {upload_err}")
+                print("请确保已运行 `huggingface-cli login` 或设置了 HF_TOKEN 环境变量")
+        else:
+            print("未检测到 huggingface_hub 库，跳过自动上传。")
+        # -----------------------------------
 
         # 6. 清理内存，防止 OOM
         del model_instance
