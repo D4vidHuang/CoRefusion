@@ -2,4 +2,6 @@
 external_repos/*/
 .DS_Store
 __pycache__
-results/
+results/.DS_Store
+results/*
+experiments/.DS_Store

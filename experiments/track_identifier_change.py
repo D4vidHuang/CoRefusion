@@ -80,8 +80,8 @@ def run_experiment():
     # Actually, the user asked to "find the average ... on the whole dataset".
     # I will start with 10 to demonstrate, then can run more.
     
-    process_limit = 3 
-    print(f"Processing first {process_limit} items for testing...")
+    process_limit = len(df)
+    print(f"Processing the entire dataset ({process_limit} items)...")
 
     for i, row in df.head(process_limit).iterrows():
         try:
@@ -96,8 +96,9 @@ def run_experiment():
             # "replace the MASK position" implies specific one.
             masked_text = input_text.replace('[MASK]', TERRIBLE_IDENTIFIER)
             
-            # Tokenize full text
-            inputs = tokenizer(masked_text, return_tensors="pt")
+            # Tokenize full text WITHOUT truncation as requested
+            # Reference: run_diffucoder_noise_exp.py
+            inputs = tokenizer(masked_text, return_tensors="pt", truncation=False)
             input_ids = inputs.input_ids.to("cuda")
             attention_mask = inputs.attention_mask.to("cuda")
             
@@ -233,7 +234,7 @@ def run_experiment():
                 output = model.diffusion_generate(
                     input_ids,
                     attention_mask=attention_mask,
-                    max_length=input_ids.shape[1], # Keep length same if we expect 1-to-1 editing
+                    max_length=input_ids.shape[1] + 1, # +1 to avoid transformers library error (max_length must be > input_length)
                     steps=256,
                     temperature=0.3,
                     top_p=0.95,
