@@ -80,29 +80,20 @@ def run_experiment():
             # Replace MASK with terrible identifier
             # We assume [MASK] appears once or we replace all? User said "the MASK position".
             # Usually strict single mask or multiple. I'll replace the first one or all.
-            # "replace the MASK position" implies specific one.
-            masked_text = input_text.replace('[MASK]', TERRIBLE_IDENTIFIER)
+            # Replace MASK with terrible identifier for tokenization and tracking
+            full_text_with_terrible = input_text.replace('[MASK]', TERRIBLE_IDENTIFIER)
             
-            # Tokenize full text WITHOUT truncation as requested
-            # Reference: run_diffucoder_noise_exp.py
-            inputs = tokenizer(masked_text, return_tensors="pt", truncation=False)
+            # FULLY TOKENIZE the code as requested
+            inputs = tokenizer(full_text_with_terrible, return_tensors="pt", truncation=False)
             input_ids = inputs.input_ids.to("cuda")
             attention_mask = inputs.attention_mask.to("cuda")
-            
-            # Find indices of the terrible identifier
-            # We tokenize the identifier alone to know what to look for
-            # Adding a space prefix might be necessary depending on where MASK was.
-            # Best way: tokenize identifier with space and without, try to find either.
-            id_tokens = tokenizer.encode(TERRIBLE_IDENTIFIER, add_special_tokens=False)
-            
-            # Since tokenizer might merge tokens depending on context, finding exact sub-sequence matches is best effort.
-            # We convert tensor to list for searching
             input_ids_list = input_ids[0].tolist()
-            
+
+            # Find the token indices of the terrible identifier
+            id_tokens = tokenizer.encode(TERRIBLE_IDENTIFIER, add_special_tokens=False)
             target_indices = find_subsequence_indices(input_ids_list, id_tokens)
             
             if not target_indices:
-                # Try with prefix space if not found
                 id_tokens_space = tokenizer.encode(" " + TERRIBLE_IDENTIFIER, add_special_tokens=False)
                 target_indices = find_subsequence_indices(input_ids_list, id_tokens_space)
             
@@ -150,20 +141,29 @@ def run_experiment():
                 decoded_step_text = tokenizer.decode(step_tokens, skip_special_tokens=True)
                 
                 # Save each step to a .java file
-                # Format: [file_id]_step[number]_[date]_[time].java
                 step_filename = f"data_{row['id']}_step{step_idx}_{timestamp}.java"
                 step_path = os.path.join(data_dir, step_filename)
                 
                 with open(step_path, "w", encoding="utf-8") as f:
-                    f.write(decoded_step_text)
+                    # In step 0-1, we can manually inject the 'terrible name' tokens for the record,
+                    # since the model might start with masks.
+                    # This helps visualize the 'denoising' of the bad name.
+                    if step_idx == 0:
+                        f.write(full_text_with_terrible)
+                    else:
+                        f.write(decoded_step_text)
 
                 # Check for identifier change
+                # We compare current step tokens at original indices to the terrible identifier tokens
                 if change_step is None:
                     if len(step_tokens) != len(input_ids_list):
+                        # Length changed, something definitely changed
                         change_step = step_idx
                     else:
                         current_segment = step_tokens[start_idx:end_idx]
                         if current_segment != original_id_tokens:
+                            # It's no longer the terrible identifier.
+                            # Since we are not using masks, any change is the 'change_step'.
                             change_step = step_idx
             
             if change_step is not None:
