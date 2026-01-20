@@ -58,7 +58,9 @@ def run_experiment():
         return
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    results_csv = f"results/identifier_change_experiment_{timestamp}.csv"
+    experiment_dir = f"results/steps_experiment_{timestamp}"
+    os.makedirs(experiment_dir, exist_ok=True)
+    results_csv = os.path.join(experiment_dir, f"identifier_change_summary_{timestamp}.csv")
     
     TERRIBLE_IDENTIFIER = "terrible_var_name_x"
     print(f"Using terrible identifier: {TERRIBLE_IDENTIFIER}")
@@ -313,30 +315,33 @@ def run_experiment():
             # I will trust the user's premise for now but log careful details.
             # If the identifier is preserved perfectly in 100% of cases, I'll stop and report.
             
+            # Create a subdirectory for this specific data point
+            data_dir = os.path.join(experiment_dir, f"data_{row['id']}")
+            os.makedirs(data_dir, exist_ok=True)
+
             for step_idx, step_tensor in enumerate(history):
                 # step_tensor shape (1, seq_len)
                 step_tokens = step_tensor[0].tolist()
                 
-                # Extract segment at the pre-calculated indices
-                # Note: length might change if model adds/removes tokens? 
-                # `diffusion_generate` usually constrained to `max_length` or fixed length in standard discrete diffusion?
-                # If length differs, indices are invalid.
-                if len(step_tokens) != len(input_ids_list):
-                    # Fallback or alignment?
-                    # For now, just compare if length matches. 
-                    # If length changes, we assume "change" happened or we can't track easily.
-                    # But DiffuCoder (SEDD based?) usually fixed length?
-                    # `max_length` logic in script: `input_ids.shape[1] + 1` or similar.
-                    # If length matches:
-                    current_segment = step_tokens[start_idx:end_idx]
-                    if current_segment != original_id_tokens:
+                # Decode the full sequence for this step
+                decoded_step_text = tokenizer.decode(step_tokens, skip_special_tokens=True)
+                
+                # Save each step to a .java file
+                # Format: [file_id]_step[number]_[date]_[time].java
+                step_filename = f"data_{row['id']}_step{step_idx}_{timestamp}.java"
+                step_path = os.path.join(data_dir, step_filename)
+                
+                with open(step_path, "w", encoding="utf-8") as f:
+                    f.write(decoded_step_text)
+
+                # Check for identifier change
+                if change_step is None:
+                    if len(step_tokens) != len(input_ids_list):
                         change_step = step_idx
-                        break
-                else:
-                    current_segment = step_tokens[start_idx:end_idx]
-                    if current_segment != original_id_tokens:
-                        change_step = step_idx
-                        break
+                    else:
+                        current_segment = step_tokens[start_idx:end_idx]
+                        if current_segment != original_id_tokens:
+                            change_step = step_idx
             
             if change_step is not None:
                 print(f"  Changed at step {change_step}")
