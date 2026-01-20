@@ -43,7 +43,7 @@ def run_experiment():
         print(f"Error loading model: {e}")
         return
 
-    csv_path = os.path.join('data', 'test.csv')
+    csv_path = os.path.join('../data', 'test.csv')
     print(f"Reading data from {csv_path}...")
     
     try:
