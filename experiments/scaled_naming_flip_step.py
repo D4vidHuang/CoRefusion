@@ -148,14 +148,14 @@ def main():
     model = AutoModel.from_pretrained(model_id, torch_dtype=torch.bfloat16, trust_remote_code=True).to("cuda").eval()
     mask_token_id = tokenizer.convert_tokens_to_ids('<|mask|>')
     
-    csv_path = 'data/test.csv'
+    csv_path = '../data/test.csv'
     print(f"Reading dataset: {csv_path} (Limit: {LIMIT})")
     df = pd.read_csv(csv_path, header=None, names=['id', 'X', 'y'], nrows=LIMIT)
     
     results = []
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    out_csv = f"results/scale_naming_exp_{timestamp}.csv"
-    os.makedirs('results', exist_ok=True)
+    out_csv = f"../results/scale_naming_exp_{timestamp}.csv"
+    os.makedirs('../results', exist_ok=True)
 
     for idx, row in df.iterrows():
         entry_id = row['id']
