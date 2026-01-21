@@ -12,14 +12,27 @@
 # --- Load necessary DelftBlue modules ---
 # We use the 2025 software stack as per the tutorial
 module load 2025 
+module load 2024r1
 module load python
 module load cuda
 module load py-numpy
 module load py-torch
 
-# --- Install missing dependencies ---
-# Using --user to install in your local home directory if not present in modules
-python3 -m pip install --user tree-sitter-languages transformers pandas
+# --- Setup Virtual Environment ---
+# Creating a persistent virtual environment in your home directory
+VENV_DIR="$HOME/venv-corefusion"
+
+if [ ! -d "$VENV_DIR" ]; then
+    echo "Creating virtual environment in $VENV_DIR..."
+    python3 -m venv "$VENV_DIR"
+fi
+
+# Activate the virtual environment
+source "$VENV_DIR/bin/activate"
+
+# Ensure pip is up to date and install missing dependencies
+python3 -m pip install --upgrade pip
+python3 -m pip install tree-sitter-languages transformers pandas
 
 # --- Experiment Execution ---
 # The script uses relative paths like '../data/test.csv', 
@@ -27,4 +40,5 @@ python3 -m pip install --user tree-sitter-languages transformers pandas
 cd experiments
 
 # Run the python script and redirect output to a log file
+# Since the venv is active, 'python3' points to the venv's python
 srun python3 scaled_naming_flip_step.py > naming_flip.log
