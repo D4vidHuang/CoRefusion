@@ -143,7 +143,7 @@ def run_tracking(tokenizer, model, code_snippet, target_range, mask_token_id):
         return float(fill_step), res_clean, orig_name
     return None, None, orig_name
 
-def upload_to_hf(file_path, repo_id="D4vidHuang/Denoising_SBS"):
+def upload_to_hf(file_path, repo_id="D4vidHuang/Dreamcoder_naming_flip"):
     """Helper to upload files to Hugging Face."""
     try:
         api = HfApi()
@@ -158,8 +158,10 @@ def upload_to_hf(file_path, repo_id="D4vidHuang/Denoising_SBS"):
 
 def main():
     LIMIT = 50 
+    REPEATS = 50
+    MAX_TOKENS = 1024 # Skip data points with more than 1024 tokens
     model_id = "Dream-org/Dream-Coder-v0-Instruct-7B"
-    hf_repo = "D4vidHuang/Denoising_SBS"
+    hf_repo = "D4vidHuang/Dreamcoder_naming_flip"
     
     print(f"Loading model: {model_id}...")
     tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
@@ -167,7 +169,7 @@ def main():
     mask_token_id = tokenizer.convert_tokens_to_ids('<|mask|>')
     
     csv_path = '../data/test.csv'
-    print(f"Reading dataset: {csv_path} (Limit: {LIMIT})")
+    print(f"Reading dataset: {csv_path} (Limit: {LIMIT}, Repeats: {REPEATS}, Token Limit: {MAX_TOKENS})")
     df = pd.read_csv(csv_path, header=None, names=['id', 'X', 'y'], nrows=LIMIT)
     
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -175,67 +177,79 @@ def main():
     os.makedirs('../results', exist_ok=True)
 
     # Prepare CSV header
-    fields = ['id', 'ground_truth', 'step_good', 'result_good', 'step_bad', 'result_bad']
+    fields = ['run_id', 'id', 'ground_truth', 'step_good', 'result_good', 'step_bad', 'result_bad']
     with open(out_csv, 'w', newline='') as f:
         writer = csv.DictWriter(f, fieldnames=fields)
         writer.writeheader()
 
     print(f"Starting experiment. Results will be saved to {out_csv} and uploaded to HF.")
 
-    # Outer Progress Bar
-    pbar_outer = tqdm(total=len(df), desc="Overall Progress")
+    # Top-level Progress Bar for Runs
+    pbar_runs = tqdm(total=REPEATS, desc="Total Runs")
     
-    for idx, row in df.iterrows():
-        entry_id = row['id']
-        X = row['X']
-        y = str(row['y'])
+    for run_idx in range(REPEATS):
+        # Middle Progress Bar for Items in this Run
+        pbar_items = tqdm(total=len(df), desc=f"Run {run_idx+1}/{REPEATS}", leave=False)
         
-        mask_start = X.find("[MASK]")
-        if mask_start == -1:
-            pbar_outer.write(f"Skip {entry_id}: No [MASK] found.")
-            pbar_outer.update(1)
-            continue
+        for idx, row in df.iterrows():
+            entry_id = row['id']
+            X = row['X']
+            y = str(row['y'])
             
-        # Inner Progress Bar for the two cases
-        pbar_inner = tqdm(total=2, desc=f"ID {entry_id}", leave=False)
-        
-        # --- GOOD CASE ---
-        code_good = X.replace("[MASK]", y)
-        target_range_good = (mask_start, mask_start + len(y))
-        step_good, val_good, _ = run_tracking(tokenizer, model, code_good, target_range_good, mask_token_id)
-        pbar_inner.update(1)
-        
-        # --- BAD CASE ---
-        bad_name = "terrible_var_xyz"
-        code_bad = X.replace("[MASK]", bad_name)
-        target_range_bad = (mask_start, mask_start + len(bad_name))
-        step_bad, val_bad, _ = run_tracking(tokenizer, model, code_bad, target_range_bad, mask_token_id)
-        pbar_inner.update(1)
-        
-        pbar_inner.close()
-        
-        # Collect result
-        res_data = {
-            'id': entry_id,
-            'ground_truth': y,
-            'step_good': step_good,
-            'result_good': val_good,
-            'step_bad': step_bad,
-            'result_bad': val_bad
-        }
-        
-        # Write to CSV immediately
-        with open(out_csv, 'a', newline='') as f:
-            writer = csv.DictWriter(f, fieldnames=fields)
-            writer.writerow(res_data)
+            # Token length check
+            tokens = tokenizer.encode(X, add_special_tokens=False)
+            if len(tokens) > MAX_TOKENS:
+                pbar_items.write(f"Skip {entry_id}: Exceeds {MAX_TOKENS} tokens (Actual: {len(tokens)}).")
+                pbar_items.update(1)
+                continue
+
+            mask_start = X.find("[MASK]")
+            if mask_start == -1:
+                pbar_items.write(f"Skip {entry_id}: No [MASK] found.")
+                pbar_items.update(1)
+                continue
+                
+            # Inner Progress Bar for the two cases (Good/Bad)
+            pbar_cases = tqdm(total=2, desc=f"Run {run_idx+1} ID {entry_id}", leave=False)
             
-        # Optional: Print to stdout too
-        pbar_outer.write(f"Completed {entry_id} -> Good Step: {step_good}, Bad Step: {step_bad}")
-        
-        # Upload to HF after each iteration
-        upload_to_hf(out_csv, repo_id=hf_repo)
-        
-        pbar_outer.update(1)
+            # --- GOOD CASE ---
+            code_good = X.replace("[MASK]", y)
+            target_range_good = (mask_start, mask_start + len(y))
+            step_good, val_good, _ = run_tracking(tokenizer, model, code_good, target_range_good, mask_token_id)
+            pbar_cases.update(1)
+            
+            # --- BAD CASE ---
+            bad_name = "terrible_var_xyz"
+            code_bad = X.replace("[MASK]", bad_name)
+            target_range_bad = (mask_start, mask_start + len(bad_name))
+            step_bad, val_bad, _ = run_tracking(tokenizer, model, code_bad, target_range_bad, mask_token_id)
+            pbar_cases.update(1)
+            
+            pbar_cases.close()
+            
+            # Collect result
+            res_data = {
+                'run_id': run_idx + 1,
+                'id': entry_id,
+                'ground_truth': y,
+                'step_good': step_good,
+                'result_good': val_good,
+                'step_bad': step_bad,
+                'result_bad': val_bad
+            }
+            
+            # Write to CSV immediately
+            with open(out_csv, 'a', newline='') as f:
+                writer = csv.DictWriter(f, fieldnames=fields)
+                writer.writerow(res_data)
+                
+            # Upload to HF after each item iteration to be safe
+            upload_to_hf(out_csv, repo_id=hf_repo)
+            
+            pbar_items.update(1)
+            
+        pbar_items.close()
+        pbar_runs.update(1)
 
     print("\n" + "="*50)
     print(f"DreamCoder Experiment Finished! Results saved to: {out_csv}")
