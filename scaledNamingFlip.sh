@@ -19,7 +19,7 @@ module load py-torch
 
 # --- Install missing dependencies ---
 # Using --user to install in your local home directory if not present in modules
-pip install --user tree-sitter-languages transformers pandas
+python3 -m pip install --user tree-sitter-languages transformers pandas
 
 # --- Experiment Execution ---
 # The script uses relative paths like '../data/test.csv', 
@@ -27,4 +27,4 @@ pip install --user tree-sitter-languages transformers pandas
 cd experiments
 
 # Run the python script and redirect output to a log file
-srun python scaled_naming_flip_step.py > naming_flip.log
+srun python3 scaled_naming_flip_step.py > naming_flip.log

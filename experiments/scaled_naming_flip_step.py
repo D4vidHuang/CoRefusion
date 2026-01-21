@@ -141,7 +141,7 @@ def run_tracking(tokenizer, model, code_snippet, target_range, mask_token_id):
     return None, None, orig_name
 
 def main():
-    LIMIT = 20 # Adjust as needed
+    LIMIT = 50 # Adjust as needed
     model_id = "apple/DiffuCoder-7B-Instruct"
     print(f"Loading model: {model_id}...")
     tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)

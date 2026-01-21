@@ -17,7 +17,7 @@ module load py-numpy
 module load py-torch
 
 # --- Install missing dependencies ---
-pip install --user tree-sitter-languages transformers pandas
+python3 -m pip install --user tree-sitter-languages transformers pandas
 
 # 注意：由于 DreamCoder 运行 768 步，生成时间会比 DiffuCoder 长，
 # 因此我将 --time 增加到了 2 小时。
@@ -26,4 +26,4 @@ pip install --user tree-sitter-languages transformers pandas
 cd experiments
     
 # 运行 DreamCoder 脚本并将输出重定向到专用日志
-srun python dreamcoder_naming_flip_step.py > dreamcoder_flip.log
+srun python3 dreamcoder_naming_flip_step.py > dreamcoder_flip.log
