@@ -130,7 +130,6 @@ def main():
     mask_token_id = tokenizer.convert_tokens_to_ids('<|mask|>')
 
     test_cases = [
-        
         """
         public class matrix_utils {
             public void scale_matrix(int[][] matrix, int factor) {
@@ -140,8 +139,350 @@ def main():
                 }
             }
         }
+        """,
+        """
+        public class Calculator {
+            public int calculateSum(int firstNumber, int secondNumber) {
+                int totalSum = firstNumber + secondNumber;
+                int result_value = totalSum;
+                return result_value;
+            }
+        }
+        """,
+        """
+        public class data_processor {
+            public void process_data(int input_val) {
+                int record_count = input_val;
+                printResults(record_count);
+            }
+            public void print_results(int count) {}
+        }
+        """,
+        """
+        public class StringHandler {
+            public String formatText(String inputStr, int maxLength) {
+                String resultStr = inputStr.trim();
+                return transform_string(resultStr);
+            }
+            public String transformString(String s) { return s; }
+        }
+        """,
+        """
+        public class list_manager {
+            public void add_item(int new_item) {
+                int list_size = 10;
+                int currentPos = 0;
+            }
+            public void clear_list() {}
+        }
+        """,
+        """
+        public class AccountService {
+            public void updateAccount(int accountId, double newBalance) {
+                double oldBalance = 0.0;
+                double TransactionAmount = newBalance - oldBalance;
+            }
+        }
+        """,
+        """
+        public class File_Handler {
+            public void write_file(String file_name) {
+                String full_path = "/tmp/" + file_name;
+                saveToDisk(full_path);
+            }
+            public void delete_file(String path) {}
+        }
+        """,
+        """
+        public class GeometryUtils {
+            public double calculateCircleArea(double circleRadius) {
+                double piValue = 3.14159;
+                double areaVal = piValue * circleRadius * circleRadius;
+                double circle_perimeter = 2 * piValue * circleRadius;
+                return areaVal;
+            }
+        }
+        """,
+        """
+        public class user_logger {
+            public void log_event(String event_msg) {
+                String timestamp_str = "10:00";
+                System.out.println(timestamp_str + event_msg);
+            }
+            public void ClearLogs() {}
+        }
+        """,
+        """
+        public class OrderManager {
+            public void processOrder(int orderId) {
+                boolean isProcessed = true;
+                send_notification(orderId);
+            }
+            public void archiveOrder(int id) {}
+        }
+        """,
+        """
+        public class sensor_data {
+            public double get_temperature() {
+                double current_temp = 25.0;
+                return current_temp;
+            }
+            public void setThreshold(double val) {}
+        }
+        """,
+        """
+        public class AuthHelper {
+            private String authToken;
+            private int tokenExpiry;
+            private String session_id;
+            public void validateToken() {}
+        }
+        """,
+        """
+        public class database_client {
+            private String db_host;
+            private int port_num;
+            private String userName;
+            public void connect_to_db() {}
+        }
+        """,
+        """
+        public class UIComponent {
+            public void renderElement(int xPos, int yPos) {
+                int widthVal = 100;
+                int height_val = 50;
+            }
+        }
+        """,
+        """
+        public class network_tool {
+            public void ping_host(String host_name) {
+                int timeout_ms = 1000;
+                int retryCount = 3;
+            }
+            public void tracert_host() {}
+        }
+        """,
+        """
+        public class SessionManager {
+            public void createSession(int userId) {
+                String sessionId = "abc";
+                long create_time = 12345L;
+            }
+        }
+        """,
+        """
+        public class task_scheduler {
+            public void schedule_task(int task_id) {
+                int delay_sec = 60;
+                runTaskNow(task_id);
+            }
+            public void cancel_task(int id) {}
+        }
+        """,
+        """
+        public class InputValidator {
+            public boolean isValidEmail(String emailAddr) {
+                String regexPattern = ".*";
+                return emailAddr.matches(regexPattern);
+            }
+            public boolean check_phone(String phone) { return true; }
+        }
+        """,
+        """
+        public class log_parser {
+            public void parse_line(String log_line) {
+                String[] parts_array = log_line.split(" ");
+                process_parts(parts_array);
+            }
+            public void resetParser() {}
+        }
+        """,
+        """
+        public class BufferWrapper {
+            public void wrapData(byte[] rawData) {
+                int bufferSize = rawData.length;
+                int offset_val = 0;
+            }
+        }
+        """,
+        """
+        public class cache_service {
+            public void put_entry(String key_name, Object val) {
+                int expiration_time = 3600;
+                checkStatus(key_name);
+            }
+            public void clear_cache() {}
+        }
+        """,
+        """
+        public class RequestValidator {
+            public void validateParams(Map<String, String> queryParams) {
+                String apiKey = queryParams.get("key");
+                String user_id = queryParams.get("id");
+            }
+        }
+        """,
+        """
+        public class db_transaction {
+            public void begin_tx() {
+                long start_time = System.currentTimeMillis();
+                boolean isActive = true;
+            }
+            public void commit_tx() {}
+        }
+        """,
+        """
+        public class ImageProcessor {
+            public void applyFilter(byte[] imageData) {
+                int imgWidth = 800;
+                int imgHeight = 600;
+                process_pixels(imageData);
+            }
+            public void saveImage() {}
+        }
+        """,
+        """
+        public class worker_pool {
+            private int max_threads;
+            private int queue_size;
+            private boolean is_running;
+            public void startPool() {}
+        }
+        """,
+        """
+        public class NotificationManager {
+            public void pushNotification(String msgContent) {
+                String targetId = "device1";
+                send_msg(targetId, msgContent);
+            }
+            public void cancelNotification() {}
+        }
+        """,
+        """
+        public class config_loader {
+            public void load_yaml(String file_path) {
+                String env_name = "dev";
+                parseConfig(file_path);
+            }
+            public void save_defaults() {}
+        }
+        """,
+        """
+        public class UserSession {
+            public void loginUser(String userName, String passWord) {
+                boolean isAuth = true;
+                set_token("token123");
+            }
+            public void logoutUser() {}
+        }
+        """,
+        """
+        public class api_client {
+            public void make_request(String url_addr) {
+                int retry_limit = 3;
+                handleResponse(url_addr);
+            }
+            public void set_timeout(int ms) {}
+        }
+        """,
+        """
+        public class EventDispatcher {
+            public void dispatchEvent(Object eventObj) {
+                String eventType = "CLICK";
+                log_event_details(eventObj);
+            }
+            public void registerListener() {}
+        }
+        """,
+        """
+        public class path_utils {
+            public String get_extension(String file_name) {
+                int dot_idx = file_name.lastIndexOf('.');
+                return getSubString(file_name, dot_idx);
+            }
+            public boolean is_absolute(String path) { return false; }
+        }
+        """,
+        """
+        public class StreamHandler {
+            public void readFromStream(InputStream input_stream) {
+                int bytesRead = input_stream.read();
+                processData(bytesRead);
+            }
+        }
+        """,
+        """
+        public class query_builder {
+            public String build_select(String table_name) {
+                String sql_query = "SELECT * FROM " + table_name;
+                return executeQuery(sql_query);
+            }
+        }
+        """,
+        """
+        public class MathLibrary {
+            public double calculateFactorial(int inputNum) {
+                double resultVal = 1.0;
+                for(int i_idx = 1; i_idx <= inputNum; i_idx++) {
+                    resultVal *= i_idx;
+                }
+                return resultVal;
+            }
+        }
+        """,
+        """
+        public class log_rotator {
+            public void rotate_logs() {
+                int max_files = 5;
+                long fileLimit = 1024L;
+            }
+            public void delete_old() {}
+        }
+        """,
+        """
+        public class StateMachine {
+            public void transitionTo(String nextState) {
+                String currentState = "IDLE";
+                update_ui(nextState);
+            }
+        }
+        """,
+        """
+        public class disk_scanner {
+            public void scan_directory(String dir_path) {
+                int total_files = 0;
+                long totalSize = 0;
+            }
+        }
+        """,
+        """
+        public class GeometryFactory {
+            public Object createShape(String shapeType) {
+                double radiusVal = 1.0;
+                return build_object(shapeType, radiusVal);
+            }
+        }
+        """,
+        """
+        public class socket_helper {
+            public void open_connection(String ip_addr, int port_num) {
+                boolean isConnected = true;
+                send_handshake();
+            }
+        }
+        """,
+        """
+        public class AppContext {
+            public void initContext() {
+                String app_name = "MyApp";
+                String appVersion = "1.0";
+            }
+        }
         """
     ]
+
+
 
     for case in test_cases:
         run_style_experiment(tokenizer, model, case.strip(), mask_token_id)
