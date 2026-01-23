@@ -5,6 +5,7 @@ import re
 from collections import Counter
 from transformers import AutoTokenizer, AutoModel
 from datetime import datetime
+import csv
 
 # --- Mock torchvision for compatibility ---
 class MockModule:
@@ -76,23 +77,20 @@ def get_style_outlier(text):
 # --------------------------------------------------
 # Experiment Engine
 # --------------------------------------------------
-def run_style_experiment(tokenizer, model, code_snippet, mask_token_id):
+def run_style_experiment(tokenizer, model, masked_code, mask_token_id):
     print("\n" + "-"*50)
-    print("Original Code Snippet:")
-    print(code_snippet)
+    print("Masked Code Snippet:")
+    print(masked_code)
     
-    outlier_name, dominant_style = get_style_outlier(code_snippet)
+    # Identify dominant style from the remaining identifiers
+    _, dominant_style = get_style_outlier(masked_code)
     
-    if not outlier_name:
-        print("No style outlier detected.")
-        return
+    if not dominant_style:
+        print("Could not determine dominant style from context.")
+        return None
 
-    print(f"\nDetected Outlier: '{outlier_name}' (Dominant Style: {dominant_style})")
-    print(f"Action: Masking all occurrences of '{outlier_name}'...")
+    print(f"\nTarget Style (Dominant Style): {dominant_style}")
 
-    # Accurate Masking: only whole words
-    masked_code = re.sub(r'\b' + outlier_name + r'\b', '<|mask|><|mask|><|mask|>', code_snippet)
-    
     inputs = tokenizer(masked_code, return_tensors="pt")
     input_ids = inputs.input_ids.to("cuda")
 
@@ -107,11 +105,16 @@ def run_style_experiment(tokenizer, model, code_snippet, mask_token_id):
         )
     
     result_text = tokenizer.decode(output.sequences[0], skip_special_tokens=True)
-    print(result_text)
+    print(f"\nGenerated Code:\n{result_text}")
+    
     # Simple extraction of what replaced the mask
     # We find the word at the position where <|mask|> used to be
-    diff_match = re.search(r'\b[A-Za-z0-9_]+\b', result_text[masked_code.find('<|mask|>'):])
-    fixed_name = diff_match.group(0) if diff_match else "Unknown"
+    mask_start_idx = masked_code.find('<|mask|>')
+    if mask_start_idx != -1:
+        diff_match = re.search(r'\b[A-Za-z0-9_]+\b', result_text[mask_start_idx:])
+        fixed_name = diff_match.group(0) if diff_match else "Unknown"
+    else:
+        fixed_name = "Unknown"
 
     print(f"\nDLLM Filled Name: '{fixed_name}'")
     fixed_style = classify_style(fixed_name)
@@ -119,8 +122,18 @@ def run_style_experiment(tokenizer, model, code_snippet, mask_token_id):
     
     if fixed_style == dominant_style:
         print("✅ SUCCESS: DLLM followed the code style consistency!")
+        success = True
     else:
         print("❌ FAILURE: DLLM did not follow the code style.")
+        success = False
+    
+    return {
+        "outlier_name": "PRE-MASKED",
+        "dominant_style": dominant_style,
+        "fixed_name": fixed_name,
+        "fixed_style": fixed_style,
+        "success": success
+    }
 
 def main():
     model_id = "apple/DiffuCoder-7B-Instruct"
@@ -129,10 +142,13 @@ def main():
     model = AutoModel.from_pretrained(model_id, torch_dtype=torch.bfloat16, trust_remote_code=True).to("cuda").eval()
     mask_token_id = tokenizer.convert_tokens_to_ids('<|mask|>')
 
+    output_file = f"style_consistency_results_{datetime.now().strftime('%m%d_%H%M')}.csv"
+    num_repeats = 50
+    
     test_cases = [
         """
         public class matrix_utils {
-            public void scale_matrix(int[][] matrix, int factor) {
+            public void <|mask|><|mask|><|mask|>(int[][] matrix, int factor) {
                 int rowCount = matrix.length;
                 for (int i = 0; i < rowCount; i++) {
                     matrix[i][0] *= factor;
@@ -142,8 +158,8 @@ def main():
         """,
         """
         public class Calculator {
-            public int calculateSum(int firstNumber, int secondNumber) {
-                int totalSum = firstNumber + secondNumber;
+            public int calculateSum(int <|mask|><|mask|><|mask|>, int secondNumber) {
+                int totalSum = <|mask|><|mask|><|mask|> + secondNumber;
                 int result_value = totalSum;
                 return result_value;
             }
@@ -151,8 +167,8 @@ def main():
         """,
         """
         public class data_processor {
-            public void process_data(int input_val) {
-                int record_count = input_val;
+            public void process_data(int <|mask|><|mask|><|mask|>) {
+                int record_count = <|mask|><|mask|><|mask|>;
                 printResults(record_count);
             }
             public void print_results(int count) {}
@@ -162,9 +178,9 @@ def main():
         public class StringHandler {
             public String formatText(String inputStr, int maxLength) {
                 String resultStr = inputStr.trim();
-                return transform_string(resultStr);
+                return <|mask|><|mask|><|mask|>(resultStr);
             }
-            public String transformString(String s) { return s; }
+            public String <|mask|><|mask|><|mask|>(String s) { return s; }
         }
         """,
         """
@@ -187,8 +203,8 @@ def main():
         """
         public class File_Handler {
             public void write_file(String file_name) {
-                String full_path = "/tmp/" + file_name;
-                saveToDisk(full_path);
+                String <|mask|><|mask|><|mask|> = "/tmp/" + file_name;
+                saveToDisk(<|mask|><|mask|><|mask|>);
             }
             public void delete_file(String path) {}
         }
@@ -196,16 +212,16 @@ def main():
         """
         public class GeometryUtils {
             public double calculateCircleArea(double circleRadius) {
-                double piValue = 3.14159;
-                double areaVal = piValue * circleRadius * circleRadius;
-                double circle_perimeter = 2 * piValue * circleRadius;
+                double <|mask|><|mask|><|mask|> = 3.14159;
+                double areaVal = <|mask|><|mask|><|mask|> * circleRadius * circleRadius;
+                double circle_perimeter = 2 * <|mask|><|mask|><|mask|> * circleRadius;
                 return areaVal;
             }
         }
         """,
         """
         public class user_logger {
-            public void log_event(String event_msg) {
+            public void <|mask|><|mask|><|mask|>(String event_msg) {
                 String timestamp_str = "10:00";
                 System.out.println(timestamp_str + event_msg);
             }
@@ -216,14 +232,14 @@ def main():
         public class OrderManager {
             public void processOrder(int orderId) {
                 boolean isProcessed = true;
-                send_notification(orderId);
+                <|mask|><|mask|><|mask|>(orderId);
             }
             public void archiveOrder(int id) {}
         }
         """,
         """
         public class sensor_data {
-            public double get_temperature() {
+            public double <|mask|><|mask|><|mask|>() {
                 double current_temp = 25.0;
                 return current_temp;
             }
@@ -232,7 +248,7 @@ def main():
         """,
         """
         public class AuthHelper {
-            private String authToken;
+            private String <|mask|><|mask|><|mask|>;
             private int tokenExpiry;
             private String session_id;
             public void validateToken() {}
@@ -240,7 +256,7 @@ def main():
         """,
         """
         public class database_client {
-            private String db_host;
+            private String <|mask|><|mask|><|mask|>;
             private int port_num;
             private String userName;
             public void connect_to_db() {}
@@ -248,7 +264,7 @@ def main():
         """,
         """
         public class UIComponent {
-            public void renderElement(int xPos, int yPos) {
+            public void <|mask|><|mask|><|mask|>(int xPos, int yPos) {
                 int widthVal = 100;
                 int height_val = 50;
             }
@@ -256,7 +272,7 @@ def main():
         """,
         """
         public class network_tool {
-            public void ping_host(String host_name) {
+            public void ping_host(String <|mask|><|mask|><|mask|>) {
                 int timeout_ms = 1000;
                 int retryCount = 3;
             }
@@ -265,7 +281,7 @@ def main():
         """,
         """
         public class SessionManager {
-            public void createSession(int userId) {
+            public void <|mask|><|mask|><|mask|>(int userId) {
                 String sessionId = "abc";
                 long create_time = 12345L;
             }
@@ -273,7 +289,7 @@ def main():
         """,
         """
         public class task_scheduler {
-            public void schedule_task(int task_id) {
+            public void <|mask|><|mask|><|mask|>(int task_id) {
                 int delay_sec = 60;
                 runTaskNow(task_id);
             }
@@ -282,16 +298,16 @@ def main():
         """,
         """
         public class InputValidator {
-            public boolean isValidEmail(String emailAddr) {
+            public boolean isValidEmail(String <|mask|><|mask|><|mask|>) {
                 String regexPattern = ".*";
-                return emailAddr.matches(regexPattern);
+                return <|mask|><|mask|><|mask|>.matches(regexPattern);
             }
             public boolean check_phone(String phone) { return true; }
         }
         """,
         """
         public class log_parser {
-            public void parse_line(String log_line) {
+            public void <|mask|><|mask|><|mask|>(String log_line) {
                 String[] parts_array = log_line.split(" ");
                 process_parts(parts_array);
             }
@@ -300,7 +316,7 @@ def main():
         """,
         """
         public class BufferWrapper {
-            public void wrapData(byte[] rawData) {
+            public void <|mask|><|mask|><|mask|>(byte[] rawData) {
                 int bufferSize = rawData.length;
                 int offset_val = 0;
             }
@@ -309,7 +325,7 @@ def main():
         """
         public class cache_service {
             public void put_entry(String key_name, Object val) {
-                int expiration_time = 3600;
+                int <|mask|><|mask|><|mask|> = 3600;
                 checkStatus(key_name);
             }
             public void clear_cache() {}
@@ -319,7 +335,7 @@ def main():
         public class RequestValidator {
             public void validateParams(Map<String, String> queryParams) {
                 String apiKey = queryParams.get("key");
-                String user_id = queryParams.get("id");
+                String <|mask|><|mask|><|mask|> = queryParams.get("id");
             }
         }
         """,
@@ -329,12 +345,12 @@ def main():
                 long start_time = System.currentTimeMillis();
                 boolean isActive = true;
             }
-            public void commit_tx() {}
+            public void <|mask|><|mask|><|mask|>() {}
         }
         """,
         """
         public class ImageProcessor {
-            public void applyFilter(byte[] imageData) {
+            public void <|mask|><|mask|><|mask|>(byte[] imageData) {
                 int imgWidth = 800;
                 int imgHeight = 600;
                 process_pixels(imageData);
@@ -344,7 +360,7 @@ def main():
         """,
         """
         public class worker_pool {
-            private int max_threads;
+            private int <|mask|><|mask|><|mask|>;
             private int queue_size;
             private boolean is_running;
             public void startPool() {}
@@ -352,7 +368,7 @@ def main():
         """,
         """
         public class NotificationManager {
-            public void pushNotification(String msgContent) {
+            public void <|mask|><|mask|><|mask|>(String msgContent) {
                 String targetId = "device1";
                 send_msg(targetId, msgContent);
             }
@@ -361,7 +377,7 @@ def main():
         """,
         """
         public class config_loader {
-            public void load_yaml(String file_path) {
+            public void <|mask|><|mask|><|mask|>(String file_path) {
                 String env_name = "dev";
                 parseConfig(file_path);
             }
@@ -370,7 +386,7 @@ def main():
         """,
         """
         public class UserSession {
-            public void loginUser(String userName, String passWord) {
+            public void <|mask|><|mask|><|mask|>(String userName, String passWord) {
                 boolean isAuth = true;
                 set_token("token123");
             }
@@ -380,7 +396,7 @@ def main():
         """
         public class api_client {
             public void make_request(String url_addr) {
-                int retry_limit = 3;
+                int <|mask|><|mask|><|mask|> = 3;
                 handleResponse(url_addr);
             }
             public void set_timeout(int ms) {}
@@ -390,14 +406,14 @@ def main():
         public class EventDispatcher {
             public void dispatchEvent(Object eventObj) {
                 String eventType = "CLICK";
-                log_event_details(eventObj);
+                <|mask|><|mask|><|mask|>(eventObj);
             }
             public void registerListener() {}
         }
         """,
         """
         public class path_utils {
-            public String get_extension(String file_name) {
+            public String <|mask|><|mask|><|mask|>(String file_name) {
                 int dot_idx = file_name.lastIndexOf('.');
                 return getSubString(file_name, dot_idx);
             }
@@ -406,25 +422,25 @@ def main():
         """,
         """
         public class StreamHandler {
-            public void readFromStream(InputStream input_stream) {
-                int bytesRead = input_stream.read();
+            public void readFromStream(InputStream <|mask|><|mask|><|mask|>) {
+                int bytesRead = <|mask|><|mask|><|mask|>.read();
                 processData(bytesRead);
             }
         }
         """,
         """
         public class query_builder {
-            public String build_select(String table_name) {
-                String sql_query = "SELECT * FROM " + table_name;
+            public String build_select(String <|mask|><|mask|><|mask|>) {
+                String sql_query = "SELECT * FROM " + <|mask|><|mask|><|mask|>;
                 return executeQuery(sql_query);
             }
         }
         """,
         """
         public class MathLibrary {
-            public double calculateFactorial(int inputNum) {
+            public double calculateFactorial(int <|mask|><|mask|><|mask|>) {
                 double resultVal = 1.0;
-                for(int i_idx = 1; i_idx <= inputNum; i_idx++) {
+                for(int i_idx = 1; i_idx <= <|mask|><|mask|><|mask|>; i_idx++) {
                     resultVal *= i_idx;
                 }
                 return resultVal;
@@ -434,7 +450,7 @@ def main():
         """
         public class log_rotator {
             public void rotate_logs() {
-                int max_files = 5;
+                int <|mask|><|mask|><|mask|> = 5;
                 long fileLimit = 1024L;
             }
             public void delete_old() {}
@@ -443,7 +459,7 @@ def main():
         """
         public class StateMachine {
             public void transitionTo(String nextState) {
-                String currentState = "IDLE";
+                String <|mask|><|mask|><|mask|> = "IDLE";
                 update_ui(nextState);
             }
         }
@@ -451,7 +467,7 @@ def main():
         """
         public class disk_scanner {
             public void scan_directory(String dir_path) {
-                int total_files = 0;
+                int <|mask|><|mask|><|mask|> = 0;
                 long totalSize = 0;
             }
         }
@@ -459,15 +475,15 @@ def main():
         """
         public class GeometryFactory {
             public Object createShape(String shapeType) {
-                double radiusVal = 1.0;
-                return build_object(shapeType, radiusVal);
+                double <|mask|><|mask|><|mask|> = 1.0;
+                return build_object(shapeType, <|mask|><|mask|><|mask|>);
             }
         }
         """,
         """
         public class socket_helper {
             public void open_connection(String ip_addr, int port_num) {
-                boolean isConnected = true;
+                boolean <|mask|><|mask|><|mask|> = true;
                 send_handshake();
             }
         }
@@ -476,16 +492,27 @@ def main():
         public class AppContext {
             public void initContext() {
                 String app_name = "MyApp";
-                String appVersion = "1.0";
+                String <|mask|><|mask|><|mask|> = "1.0";
             }
         }
         """
     ]
 
+    with open(output_file, mode='w', newline='') as f:
+        writer = csv.DictWriter(f, fieldnames=["repeat_idx", "case_idx", "outlier_name", "dominant_style", "fixed_name", "fixed_style", "success"])
+        writer.writeheader()
 
+        for r in range(num_repeats):
+            print(f"\n{'='*20} Starting Repeat {r+1}/{num_repeats} {'='*20}")
+            for i, case in enumerate(test_cases):
+                result = run_style_experiment(tokenizer, model, case.strip(), mask_token_id)
+                if result:
+                    result["repeat_idx"] = r
+                    result["case_idx"] = i
+                    writer.writerow(result)
+                    f.flush() # Ensure data is written incrementally
 
-    for case in test_cases:
-        run_style_experiment(tokenizer, model, case.strip(), mask_token_id)
+    print(f"\nExperiment complete. Results saved to {output_file}")
 
 if __name__ == "__main__":
     main()
