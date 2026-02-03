@@ -168,13 +168,18 @@ def main():
     model = AutoModel.from_pretrained(model_id, torch_dtype=torch.bfloat16, trust_remote_code=True).to("cuda").eval()
     mask_token_id = tokenizer.convert_tokens_to_ids('<|mask|>')
     
-    csv_path = '../data/test.csv'
+    # 计算项目根目录
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.dirname(script_dir)
+    
+    csv_path = os.path.join(project_root, 'data', 'test.csv')
     print(f"Reading dataset: {csv_path} (Limit: {LIMIT}, Repeats: {REPEATS}, Token Limit: {MAX_TOKENS})")
     df = pd.read_csv(csv_path, header=None, names=['id', 'X', 'y'], nrows=LIMIT)
     
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    out_csv = f"../results/scale_naming_exp_{timestamp}.csv"
-    os.makedirs('../results', exist_ok=True)
+    results_dir = os.path.join(project_root, 'results')
+    os.makedirs(results_dir, exist_ok=True)
+    out_csv = os.path.join(results_dir, f"scale_naming_exp_{timestamp}.csv")
 
     # Prepare CSV header
     fields = ['run_id', 'id', 'ground_truth', 'step_good', 'result_good', 'step_bad', 'result_bad']

@@ -21,11 +21,13 @@ from unified_framework import MODEL_REGISTRY
 
 def main():
     # 1. 配置路径
-    input_file = os.path.join('data', 'test.csv')
-    output_dir = 'results'
+    # 获取脚本所在的根目录
+    root_dir = os.path.dirname(os.path.abspath(__file__))
+    input_file = os.path.join(root_dir, 'data', 'test.csv')
+    output_dir = os.path.join(root_dir, 'results')
     
     if not os.path.exists(output_dir):
-        os.makedirs(output_dir)
+        os.makedirs(output_dir, exist_ok=True)
 
     # 2. 读取数据
     print(f"正在读取数据: {input_file} ...")
