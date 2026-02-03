@@ -79,30 +79,52 @@ class DiffuCoderModel(BaseModel):
         self.tokenizer = AutoTokenizer.from_pretrained(self.model_id, trust_remote_code=True)
 
     def generate(self, prompt, **kwargs):
-        full_prompt = f"<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\n{prompt.strip()}\n<|im_end|>\n<|im_start|>assistant\n"
-        inputs = self.tokenizer(full_prompt, return_tensors="pt")
-        input_ids = inputs.input_ids.to(device="cuda")
-        attention_mask = inputs.attention_mask.to(device="cuda")
-
-        output = self.model.diffusion_generate(
-            input_ids,
-            attention_mask=attention_mask,
-            max_new_tokens=kwargs.get('max_new_tokens', 256),
-            steps=kwargs.get('steps', 256),
-            temperature=kwargs.get('temperature', 0.3),
-            top_p=0.95,
-            alg="entropy",
-            alg_temp=0.,
-        )
+        is_infill = kwargs.get('is_infill', False)
+        mask_token = kwargs.get('mask_token', '<|mask|>')
         
-        # Handle cases where output is a Tensor or a dict-like object
-        if hasattr(output, "sequences"):
-            seqs = output.sequences
+        if is_infill:
+            # For infilling, we replace [MASK] with four mask tokens
+            # to allow more space for identifier generation
+            num_masks = kwargs.get('num_masks', 4)
+            inference_text = prompt.replace('[MASK]', mask_token * num_masks)
+            inputs = self.tokenizer(inference_text, return_tensors="pt")
+            input_ids = inputs.input_ids.to(device="cuda")
+            attention_mask = inputs.attention_mask.to(device="cuda")
+            
+            output = self.model.diffusion_generate(
+                input_ids,
+                attention_mask=attention_mask,
+                max_new_tokens=1, 
+                steps=kwargs.get('steps', 256),
+                temperature=kwargs.get('temperature', 0.3),
+                top_p=0.95,
+                alg="entropy",
+                alg_temp=0.,
+            )
+            seqs = output.sequences if hasattr(output, "sequences") else output
+            decoded = self.tokenizer.decode(seqs[0], skip_special_tokens=True)
+            # Find the part that was masked. This is tricky. 
+            # Often we just return the whole denoised code if it's for refactoring.
+            return decoded
         else:
-            seqs = output
+            full_prompt = f"<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\n{prompt.strip()}\n<|im_end|>\n<|im_start|>assistant\n"
+            inputs = self.tokenizer(full_prompt, return_tensors="pt")
+            input_ids = inputs.input_ids.to(device="cuda")
+            attention_mask = inputs.attention_mask.to(device="cuda")
 
-        generations = [self.tokenizer.decode(g[len(p):].tolist()) for p, g in zip(input_ids, seqs)]
-        return generations[0].split('<|dlm_pad|>')[0]
+            output = self.model.diffusion_generate(
+                input_ids,
+                attention_mask=attention_mask,
+                max_new_tokens=kwargs.get('max_new_tokens', 256),
+                steps=kwargs.get('steps', 256),
+                temperature=kwargs.get('temperature', 0.3),
+                top_p=0.95,
+                alg="entropy",
+                alg_temp=0.,
+            )
+            seqs = output.sequences if hasattr(output, "sequences") else output
+            generations = [self.tokenizer.decode(g[len(p):].tolist()) for p, g in zip(input_ids, seqs)]
+            return generations[0].split('<|dlm_pad|>')[0]
 
 class LLaDAModel(BaseModel):
     def load(self):
@@ -112,17 +134,46 @@ class LLaDAModel(BaseModel):
     def generate(self, prompt, **kwargs):
         if llada_generate is None:
             raise ImportError("Could not import generate from LLaDA repo")
-        m = [{"role": "user", "content": prompt}]
-        user_input = self.tokenizer.apply_chat_template(m, add_generation_prompt=True, tokenize=False)
-        input_ids = self.tokenizer(user_input)['input_ids']
-        input_ids = torch.tensor(input_ids).to('cuda').unsqueeze(0)
         
-        gen_length = kwargs.get('gen_length', 128)
-        steps = kwargs.get('steps', 128)
-        
-        out = llada_generate(self.model, input_ids, steps=steps, gen_length=gen_length, block_length=32, temperature=0., cfg_scale=0., remasking='low_confidence')
-        answer = self.tokenizer.batch_decode(out[:, input_ids.shape[1]:], skip_special_tokens=True)[0]
-        return answer
+        is_infill = kwargs.get('is_infill', False)
+        mask_id = 126336 # Standard LLaDA mask_id
+
+        if is_infill:
+            # Replace [MASK] with four mask tokens
+            num_masks = kwargs.get('num_masks', 4)
+            m_text = self.tokenizer.decode([mask_id])
+            input_text = prompt.replace('[MASK]', m_text * num_masks)
+            inputs = self.tokenizer(input_text, return_tensors="pt")
+            input_ids = inputs.input_ids.to('cuda')
+            
+            # Ensure mask tokens are correctly identified as mask_id in input_ids
+            # (Sometimes tokenizer encodes the text representation differently)
+            m_encoded = self.tokenizer.encode(m_text, add_special_tokens=False)
+            for m_id in m_encoded:
+                input_ids[input_ids == m_id] = mask_id
+
+            out = llada_generate(
+                self.model, 
+                input_ids, 
+                steps=kwargs.get('steps', 128), 
+                gen_length=kwargs.get('gen_length', 1), # 1 triggers infilling mode in some setups, or we use the whole len
+                block_length=kwargs.get('block_length', 32),
+                mask_id=mask_id
+            )
+            # The output will have the mask filled
+            return self.tokenizer.decode(out[0], skip_special_tokens=True)
+        else:
+            m = [{"role": "user", "content": prompt}]
+            user_input = self.tokenizer.apply_chat_template(m, add_generation_prompt=True, tokenize=False)
+            input_ids = self.tokenizer(user_input)['input_ids']
+            input_ids = torch.tensor(input_ids).to('cuda').unsqueeze(0)
+            
+            gen_length = kwargs.get('gen_length', 128)
+            steps = kwargs.get('steps', 128)
+            
+            out = llada_generate(self.model, input_ids, steps=steps, gen_length=gen_length, block_length=32, temperature=0., cfg_scale=0., remasking='low_confidence')
+            answer = self.tokenizer.batch_decode(out[:, input_ids.shape[1]:], skip_special_tokens=True)[0]
+            return answer
 
 class LlamaModel(BaseModel):
     def load(self):
