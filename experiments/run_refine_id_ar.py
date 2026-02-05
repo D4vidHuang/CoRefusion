@@ -110,7 +110,7 @@ def run_experiment():
                     prompt = (
                         "The following Java code has one or more identifier names replaced by [MASK]. "
                         "Based on the context, what are the original names of these identifiers? "
-                        "Provide ONLY the identifier names as your response.\n\n"
+                        "Provide the complete code with the identifier names as your response.\n\n"
                         f"Code:\n{masked_code}\n\n"
                         "Identifier:"
                     )
