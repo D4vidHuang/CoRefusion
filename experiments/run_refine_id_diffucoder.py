@@ -89,13 +89,17 @@ def run_experiment():
         ground_truth = str(row['target']).strip()
 
         try:
-            # Replace [MASK] with 4 mask tokens
-            # Create the input with 4 mask tokens instead of [MASK]
-            multi_mask = " ".join([MASK_TOKEN] * NUM_MASK_TOKENS)
-            input_code = masked_code.replace("[MASK]", multi_mask)
+            # Use chat template for the Instruct model to guide it correctly
+            # We provide the full masked code and ask for the missing identifier.
+            prompt = (
+                f"<|im_start|>system\nYou are a helpful assistant for code completion. "
+                f"Predict the missing Java identifier for the [MASK] position. Provide ONLY the identifier name.<|im_end|>\n"
+                f"<|im_start|>user\nWhat is the [MASK] identifier in the following code?\n\n{masked_code}<|im_end|>\n"
+                f"<|im_start|>assistant\n"
+            )
             
             # Tokenize input
-            inputs = tokenizer(input_code, return_tensors="pt")
+            inputs = tokenizer(prompt, return_tensors="pt")
             input_ids = inputs.input_ids.to(model.device)
             attention_mask = inputs.attention_mask.to(model.device)
             
@@ -118,14 +122,13 @@ def run_experiment():
                     alg_temp=0.
                 )
             
-            # Decode the generated sequence (following official output processing)
+            # Decode the generated sequence
             generated_ids = output.sequences[0]
-            # Decode only the new tokens (skip input)
+            # Decode only the tokens generated after the prompt
             generated_text = tokenizer.decode(
-                generated_ids[len(input_ids[0]):].tolist()
+                generated_ids[len(input_ids[0]):].tolist(),
+                skip_special_tokens=False # Keep special tokens to split them manually if needed
             )
-            # Remove DiffuCoder padding tokens
-            generated_text = generated_text.split('<|dlm_pad|>')[0]
             
             # Extract the filled identifier
             # The generated_text should contain the filled identifier
