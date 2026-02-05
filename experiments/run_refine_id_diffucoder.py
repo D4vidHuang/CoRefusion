@@ -32,13 +32,27 @@ NUM_MASK_TOKENS = 4  # Use 4 mask tokens to replace [MASK]
 
 def clean_prediction(text):
     """Extracts a clean identifier from model output."""
-    # Remove whitespace and newlines
-    text = text.strip().split('\n')[0].strip('`"\' ')
-    # Match first valid Java identifier found
-    match = re.search(r'[a-zA-Z_][a-zA-Z0-9_]*', text)
+    # Remove special and padding tokens
+    text = text.replace("<|im_end|>", "").replace("<|dlm_pad|>", "").strip()
+    
+    # Take the first line and trim common quotes
+    first_line = text.split('\n')[0].strip('`"\' ')
+    
+    # If the model gives a full sentence like "The identifier is context", 
+    # try to extract the last word or the identifier after 'is'.
+    if " " in first_line:
+        m = re.search(r'is\s+([a-zA-Z_][a-zA-Z0-9_]*)', first_line, re.I)
+        if m: return m.group(1)
+        words = first_line.split()
+        last_word = words[-1].strip('.,;!?`"\' ')
+        if re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', last_word):
+            return last_word
+
+    # Match first valid Java identifier found in the first line
+    match = re.search(r'[a-zA-Z_][a-zA-Z0-9_]*', first_line)
     if match:
         return match.group(0)
-    return text
+    return first_line
 
 def run_experiment():
     if not os.path.exists(RESULTS_DIR):
