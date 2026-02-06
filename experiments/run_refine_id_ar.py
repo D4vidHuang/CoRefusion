@@ -12,24 +12,28 @@ DATA_PATH = "data/test_filtered_1024.csv"
 RESULTS_DIR = "results"
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
-# Model Registry with IDs and descriptions
+# Model Registry with IDs and types
 MODEL_METADATA = {
-    "Qwen2.5-Coder-7B-Instruct": {
-        "id": "Qwen/Qwen2.5-Coder-7B-Instruct",
-    },
-    "DeepSeek-Coder-6.7B-Instruct": {
-        "id": "deepseek-ai/deepseek-coder-6.7b-instruct",
-    },
-    "Llama-3.1-8B-Instruct": {
-        "id": "meta-llama/Meta-Llama-3.1-8B-Instruct",
-    },
     "StarCoder2-7B": {
         "id": "bigcode/starcoder2-7b",
+        "type": "starcoder",
+    },
+    "DeepSeek-Coder-6.7B-Base": {
+        "id": "deepseek-ai/deepseek-coder-6.7b-base",
+        "type": "deepseek",
     }
 }
 
-def clean_prediction(text):
+def clean_prediction(text, model_type):
     """Extracts a clean identifier from model output."""
+    # Remove special tokens that might be in the decoded text
+    if model_type == "starcoder":
+        for token in ["<fim_prefix>", "<fim_suffix>", "<fim_middle>", "<|endoftext|>", "<file_sep>"]:
+            text = text.replace(token, "")
+    elif model_type == "deepseek":
+        for token in ["<｜fim begin｜>", "<｜fim hole｜>", "<｜fim end｜>", "<｜end of sentence｜>"]:
+            text = text.replace(token, "")
+            
     # Remove whitespace and newlines
     text = text.strip().split('\n')[0].strip('`"\' ')
     # Match first valid Java identifier found
@@ -54,7 +58,6 @@ def run_experiment():
         print(f"\n{'='*50}")
         print(f"Running Experiment for: {model_name}")
         print(f"Model ID: {meta['id']}")
-        print(f"Description: {meta['description']}")
         print(f"{'='*50}")
 
         try:
@@ -81,17 +84,28 @@ def run_experiment():
             ground_truth = str(row['target']).strip()
 
             try:
-                prediction = ""
+                current_code = masked_code
+                predictions = []
                 
-                if "StarCoder2" in model_name:
-                    # FIM format for StarCoder2
-                    # Find first mask position
-                    parts = masked_code.split("[MASK]", 1)
+                # Iterate until all [MASK] tokens are filled
+                mask_count = current_code.count("[MASK]")
+                
+                for i in range(mask_count):
+                    # Split at the first [MASK]
+                    # Note: we must find the position of the FIRST [MASK]
+                    parts = current_code.split("[MASK]", 1)
                     prefix = parts[0]
                     suffix = parts[1] if len(parts) > 1 else ""
                     
-                    # FIM Prompt
-                    prompt = f"<fim_prefix>{prefix}<fim_suffix>{suffix}<fim_middle>"
+                    # Prepare FIM Prompt
+                    if meta['type'] == "starcoder":
+                        prompt = f"<fim_prefix>{prefix}<fim_suffix>{suffix}<fim_middle>"
+                    elif meta['type'] == "deepseek":
+                        # DeepSeek Coder FIM format
+                        prompt = f"<｜fim begin｜>{prefix}<｜fim hole｜>{suffix}<｜fim end｜>"
+                    else:
+                        prompt = f"<fim_prefix>{prefix}<fim_suffix>{suffix}<fim_middle>"
+                    
                     inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
                     
                     with torch.no_grad():
@@ -99,51 +113,30 @@ def run_experiment():
                             **inputs,
                             max_new_tokens=20,
                             do_sample=False,
-                            pad_token_id=tokenizer.eos_token_id
+                            pad_token_id=tokenizer.eos_token_id if tokenizer.eos_token_id is not None else tokenizer.pad_token_id
                         )
                     
+                    # Decode only the generated part
                     raw_pred = tokenizer.decode(outputs[0][inputs.input_ids.shape[1]:], skip_special_tokens=True)
-                    prediction = clean_prediction(raw_pred)
-                
-                else:
-                    # Instruct format for Qwen, DeepSeek, Llama
-                    prompt = (
-                        "The following Java code has one or more identifier names replaced by [MASK]. "
-                        "Based on the context, what are the original names of these identifiers? "
-                        "Provide the complete code with the identifier names as your response.\n\n"
-                        f"Code:\n{masked_code}\n\n"
-                        "Identifier:"
-                    )
+                    prediction = clean_prediction(raw_pred, meta['type'])
+                    predictions.append(prediction)
                     
-                    # Apply chat template if available, otherwise use raw prompt
-                    if hasattr(tokenizer, "apply_chat_template"):
-                        messages = [{"role": "user", "content": prompt}]
-                        formatted_prompt = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-                    else:
-                        formatted_prompt = prompt
+                    # Replace the first [MASK] with the prediction for the next iteration
+                    current_code = prefix + prediction + suffix
 
-                    inputs = tokenizer(formatted_prompt, return_tensors="pt").to(model.device)
-                    
-                    with torch.no_grad():
-                        outputs = model.generate(
-                            **inputs,
-                            max_new_tokens=20,
-                            do_sample=False,
-                            pad_token_id=tokenizer.eos_token_id if tokenizer.eos_token_id else 0
-                        )
-                    
-                    raw_pred = tokenizer.decode(outputs[0][inputs.input_ids.shape[1]:], skip_special_tokens=True)
-                    prediction = clean_prediction(raw_pred)
-
-                # Reconstruct full code with prediction
-                full_code = masked_code.replace("[MASK]", prediction)
+                # For evaluation, we typically compare with the ground truth
+                # If there are multiple predictions, we store them all but compare the main one or just check if any are wrong.
+                # Usually in this dataset, all [MASK] in one row refer to the same identifier.
+                # So we take the first prediction for accuracy calculation.
+                primary_prediction = predictions[0] if predictions else ""
                 
                 results.append({
                     "id": item_id,
                     "ground_truth": ground_truth,
-                    "prediction": prediction,
-                    "full_code": full_code,
-                    "correct": (prediction == ground_truth)
+                    "prediction": primary_prediction,
+                    "all_predictions": "|".join(predictions),
+                    "full_code": current_code,
+                    "correct": (primary_prediction == ground_truth)
                 })
 
             except Exception as e:
@@ -151,7 +144,8 @@ def run_experiment():
                 results.append({"id": item_id, "error": str(e)})
 
         # Save results for this model
-        output_file = os.path.join(RESULTS_DIR, f"{model_name}_refineID_results.csv")
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        output_file = os.path.join(RESULTS_DIR, f"{model_name}_refineID_results_{timestamp}.csv")
         pd.DataFrame(results).to_csv(output_file, index=False)
         
         accuracy = sum(1 for r in results if r.get('correct', False)) / len(results) if results else 0
