@@ -15,7 +15,7 @@ Usage:
     python experiments/benchmark_ar_models_fim.py                        # run all models
     python experiments/benchmark_ar_models_fim.py --model StarCoder2-3B  # single model
     python experiments/benchmark_ar_models_fim.py --max-samples 100      # quick test
-    python experiments/benchmark_ar_models_fim.py --model StarCoder2-3B --model DeepSeek-Coder-6.7B-Base
+    python experiments/benchmark_ar_models_fim.py --hf-repo your-username/your-repo --hf-token your-token
 """
 
 import os
@@ -30,6 +30,12 @@ from datetime import datetime
 import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from tqdm import tqdm
+
+try:
+    from huggingface_hub import HfApi
+    HAS_HF_HUB = True
+except ImportError:
+    HAS_HF_HUB = False
 
 # ---- Configuration ---------------------------------------------------------
 
@@ -213,9 +219,41 @@ def run_fim_on_sample(masked_code, model, tokenizer, model_type, max_input_token
     return predictions, raw_predictions, fim_prompts, current_code
 
 
+# ---- HF Upload Helper -------------------------------------------------------
+
+def upload_to_hf(file_path, repo_id, token, path_in_repo=None):
+    """Upload a file to Hugging Face Hub."""
+    if not HAS_HF_HUB:
+        print("    ERROR: 'huggingface_hub' not installed. Skipping upload.")
+        return False
+    
+    if not repo_id:
+        return False
+
+    try:
+        api = HfApi()
+        filename = os.path.basename(file_path)
+        if path_in_repo is None:
+            path_in_repo = f"ar_fim_benchmark/{filename}"
+        
+        print(f"    Uploading {filename} to HF repo {repo_id}...")
+        api.upload_file(
+            path_or_fileobj=file_path,
+            path_in_repo=path_in_repo,
+            repo_id=repo_id,
+            token=token,
+            repo_type="dataset"
+        )
+        print("    Upload successful.")
+        return True
+    except Exception as e:
+        print(f"    Upload failed: {e}")
+        return False
+
+
 # ---- Main Benchmark ---------------------------------------------------------
 
-def run_benchmark(target_models=None, max_samples=None):
+def run_benchmark(target_models=None, max_samples=None, hf_repo=None, hf_token=None):
     """Run the FIM benchmark on the refineID dataset."""
     os.makedirs(RESULTS_DIR, exist_ok=True)
 
@@ -332,6 +370,10 @@ def run_benchmark(target_models=None, max_samples=None):
         print(f"  Errors:   {errors}")
         print(f"  Results:  {out_file}")
 
+        # ── Auto-upload to HF ────────────────────────────────────────
+        if hf_repo:
+            upload_to_hf(out_file, hf_repo, hf_token)
+
         summary.append({
             "model": model_name,
             "hf_id": meta["id"],
@@ -357,6 +399,10 @@ def run_benchmark(target_models=None, max_samples=None):
             writer = csv.DictWriter(f, fieldnames=list(summary[0].keys()))
             writer.writeheader()
             writer.writerows(summary)
+            
+        # Upload summary too
+        if hf_repo:
+            upload_to_hf(summary_file, hf_repo, hf_token)
 
     # ── Print summary table ───────────────────────────────────────────
     print(f"\n{'='*60}")
@@ -376,7 +422,7 @@ def run_benchmark(target_models=None, max_samples=None):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Benchmark AR models on refineID using FIM"
+        description="Benchmark AR models on refineID using FIM with HF upload"
     )
     parser.add_argument(
         "--model", action="append", default=None,
@@ -386,6 +432,14 @@ if __name__ == "__main__":
     parser.add_argument(
         "--max-samples", type=int, default=None,
         help="Maximum number of test samples to evaluate (for quick tests)."
+    )
+    parser.add_argument(
+        "--hf-repo", type=str, default=None,
+        help="Hugging Face Dataset repo ID (e.g. 'username/repo-name') to upload results."
+    )
+    parser.add_argument(
+        "--hf-token", type=str, default=os.environ.get("HF_TOKEN"),
+        help="HF Write Token. Recommended to set in HF_TOKEN env var."
     )
     parser.add_argument(
         "--list-models", action="store_true",
@@ -400,4 +454,14 @@ if __name__ == "__main__":
             print(f"  {name:<30} {meta['id']}")
         sys.exit(0)
 
-    run_benchmark(target_models=args.model, max_samples=args.max_samples)
+    # Check if HF hub is installed if repo is provided
+    if args.hf_repo and not HAS_HF_HUB:
+        print("WARNING: --hf-repo provided but 'huggingface_hub' is not installed.")
+        print("Install it with: pip install huggingface_hub")
+
+    run_benchmark(
+        target_models=args.model, 
+        max_samples=args.max_samples,
+        hf_repo=args.hf_repo,
+        hf_token=args.hf_token
+    )
