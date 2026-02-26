@@ -108,7 +108,7 @@ BAD_NAMES_BY_SEVERITY = {
 ALL_BAD_NAMES = [n for names in BAD_NAMES_BY_SEVERITY.values() for n in names]
 
 # Experiment parameters
-TOTAL_STEPS = 256
+TOTAL_STEPS = 32
 LIMIT = 50
 REPEATS = 10
 MAX_TOKENS = 1024

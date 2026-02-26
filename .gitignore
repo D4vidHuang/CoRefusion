@@ -5,3 +5,5 @@ __pycache__
 results/.DS_Store
 results/*
 experiments/.DS_Store
+
+misc.ipynb
