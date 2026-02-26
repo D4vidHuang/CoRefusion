@@ -1,0 +1,87 @@
+======================================================================
+ EXPERIMENT RESULTS: Code Smell's Noise Role
+======================================================================
+
+──────────────────────────────────────────────────────────────────────
+ PHASE 2/3: Single-Pass Probing Results
+──────────────────────────────────────────────────────────────────────
+
+  ┌─ Group: MASK
+  │  Samples: 1000
+  │  Current Token Prob:  0.000000
+  │  Current Token Rank:  95047.1
+  │  GT Token Prob:       0.000965
+  │  GT Token Rank:       1239.5
+  │  Entropy:             0.2868
+  └─
+
+  ┌─ Group: SMELL
+  │  Severity: severe (n=1000)
+  │    Current Token Prob:  0.000693
+  │    Current Token Rank:  608.0
+  │    GT Token Prob:       0.000078
+  │    GT Token Rank:       5191.7
+  │    Entropy:             0.4546
+  │  Severity: moderate (n=1000)
+  │    Current Token Prob:  0.000199
+  │    Current Token Rank:  138.5
+  │    GT Token Prob:       0.000019
+  │    GT Token Rank:       4960.0
+  │    Entropy:             0.5598
+  │  Severity: mild (n=1000)
+  │    Current Token Prob:  0.000302
+  │    Current Token Rank:  659.7
+  │    GT Token Prob:       0.000026
+  │    GT Token Rank:       3647.4
+  │    Entropy:             0.3320
+  └─
+
+  ┌─ Group: CONTROL
+  │  Samples: 1000
+  │  Current Token Prob:  0.000012
+  │  Current Token Rank:  3511.1
+  │  GT Token Prob:       0.000012
+  │  GT Token Rank:       3511.1
+  │  Entropy:             0.2753
+  └─
+
+──────────────────────────────────────────────────────────────────────
+ PHASE 4: Equivalent Noise Level Mapping
+   (Which diffusion step does code smell correspond to?)
+   (Step 0 = full mask/noise, Step 255 = fully denoised)
+──────────────────────────────────────────────────────────────────────
+
+  ┌─ Group: SMELL
+  │  Severity: severe (n=1000)
+  │    Equiv Step (entropy):    0.3 / 256
+  │    Equiv Step (GT prob):    0.1 / 256
+  │    Equiv Step (confidence): 0.3 / 256
+  │    ≈ Noise Level:           99.9% (entropy), 100.0% (GT prob)
+  │  Severity: moderate (n=1000)
+  │    Equiv Step (entropy):    0.4 / 256
+  │    Equiv Step (GT prob):    0.1 / 256
+  │    Equiv Step (confidence): 0.4 / 256
+  │    ≈ Noise Level:           99.9% (entropy), 100.0% (GT prob)
+  │  Severity: mild (n=1000)
+  │    Equiv Step (entropy):    0.2 / 256
+  │    Equiv Step (GT prob):    0.1 / 256
+  │    Equiv Step (confidence): 0.2 / 256
+  │    ≈ Noise Level:           99.9% (entropy), 100.0% (GT prob)
+  └─
+
+  ┌─ Group: CONTROL
+  │  Samples: 1000
+  │  Equiv Step (entropy):    0.1 / 256
+  │  Equiv Step (GT prob):    0.1 / 256
+  │  Equiv Step (confidence): 0.1 / 256
+  │  ≈ Noise Level:           99.9% (entropy), 100.0% (GT prob)
+  └─
+
+──────────────────────────────────────────────────────────────────────
+ KEY FINDING
+──────────────────────────────────────────────────────────────────────
+  Code Smell maps to ~step 0/256 on the noise schedule
+  Clean Code maps to ~step 0/256 on the noise schedule
+  Noise level difference: 0.2 steps
+
+======================================================================
