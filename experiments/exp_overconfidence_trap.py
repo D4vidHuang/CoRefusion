@@ -88,6 +88,11 @@ RESULTS_DIR = os.path.join(ROOT_DIR, "results", "overconfidence_trap")
 DEVICE      = "cuda" if torch.cuda.is_available() else "cpu"
 MAX_TOKS    = 512
 
+# Half-window on each side of [MASK] — keeps the target always visible.
+# The mask token itself occupies 1 slot; prefix gets LEFT_CTX tokens,
+# suffix gets MAX_TOKS - LEFT_CTX - 1 tokens.
+LEFT_CTX    = MAX_TOKS // 2   # = 256 tokens of left context
+
 # Code-smell vocabulary — single-char loops, generic short names
 SMELL_VOCAB = {
     "x", "y", "z", "a", "b", "c", "n", "k", "v",
@@ -177,6 +182,49 @@ def metrics_at_position(logits, position: int, target_token_id: int) -> dict:
         "base_prob":    target_prob,
     }
 
+
+def build_centered_window(tokenizer, original_code: str,
+                           mask_char: int, gt_name: str,
+                           mask_id: int) -> tuple:
+    """
+    Build a 512-token input centered on the [MASK] identifier position.
+
+    Strategy
+    --------
+    1. Tokenise the prefix (everything BEFORE the identifier) and suffix
+       (everything AFTER the identifier) separately, without special tokens.
+    2. Take the last LEFT_CTX tokens of the prefix and the first
+       (MAX_TOKS - LEFT_CTX - 1) tokens of the suffix.
+    3. Insert <|mask|> between them.
+    4. Prepend BOS if the tokenizer uses one.
+
+    Returns
+    -------
+    input_ids  : LongTensor [1, seq_len]   — ready for the model
+    target_idx : int                        — position of the mask token
+    """
+    mask_len = len(gt_name)
+    prefix_text = original_code[:mask_char]
+    suffix_text = original_code[mask_char + mask_len:]
+
+    prefix_ids = tokenizer.encode(prefix_text, add_special_tokens=False)
+    suffix_ids = tokenizer.encode(suffix_text, add_special_tokens=False)
+
+    right_ctx = MAX_TOKS - LEFT_CTX - 1       # tokens available for suffix
+
+    prefix_win = prefix_ids[-LEFT_CTX:]        # last LEFT_CTX prefix tokens
+    suffix_win = suffix_ids[:right_ctx]        # first right_ctx suffix tokens
+
+    # Prepend BOS if the model uses one
+    bos = ([tokenizer.bos_token_id]
+           if getattr(tokenizer, "bos_token_id", None) is not None else [])
+
+    token_seq = bos + prefix_win + [mask_id] + suffix_win
+    target_idx = len(bos) + len(prefix_win)   # index of <|mask|> in the window
+
+    input_ids = torch.tensor([token_seq], dtype=torch.long).to(DEVICE)
+    return input_ids, target_idx
+
 # ── Data loading ───────────────────────────────────────────────────────────────
 
 def load_data(data_path: str, max_samples: int = None) -> list:
@@ -261,32 +309,21 @@ def run_experiment(target_models=None, max_samples=None,
             if mask_char == -1:
                 continue
 
-            # Reconstruct the full original code (gt name in place of [MASK])
+            # Restore the original identifier (remove [MASK] placeholder)
             original_code = masked_code.replace("[MASK]", gt_name, 1)
 
-            # ── Tokenise full code ───────────────────────────────────────────
-            enc = tokenizer(
-                original_code,
-                return_tensors="pt",
-                truncation=True,
-                max_length=MAX_TOKS,
-            )
-            input_ids = enc["input_ids"].to(DEVICE)
-            seq_len   = input_ids.shape[1]
-
-            # ── Locate the target token position ────────────────────────────
-            # Approximate via prefix-length heuristic (same as partial_masking_noise_map.py)
-            prefix     = original_code[:mask_char]
-            prefix_ids = tokenizer.encode(prefix, add_special_tokens=False)
-            target_idx = min(len(prefix_ids), seq_len - 2)
-
-            # ── Place <|mask|> ONLY at the target position ─────────────────
-            masked_input = input_ids.clone()
-            masked_input[0, target_idx] = mask_id
-
-            # ── Target token id ──────────────────────────────────────────────
+            # ── Build CENTERED window: [MASK] always at LEFT_CTX ────────────
+            # This is the critical fix vs. left-aligned truncation which
+            # silently clamps 93% of samples to target_idx = 510 (wrong!).
             gt_tok_ids  = tokenizer.encode(gt_name, add_special_tokens=False)
             gt_token_id = gt_tok_ids[0] if gt_tok_ids else (tokenizer.unk_token_id or 0)
+
+            try:
+                masked_input, target_idx = build_centered_window(
+                    tokenizer, original_code, mask_char, gt_name, mask_id
+                )
+            except Exception as e:
+                continue
 
             # ── Forward pass ─────────────────────────────────────────────────
             try:

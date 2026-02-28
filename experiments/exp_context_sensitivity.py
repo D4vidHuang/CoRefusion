@@ -80,6 +80,9 @@ RESULTS_DIR = os.path.join(ROOT_DIR, "results", "context_sensitivity")
 DEVICE      = "cuda" if torch.cuda.is_available() else "cpu"
 MAX_TOKS    = 512
 
+# Half-window: center the 512-token budget on [MASK] so it is always visible.
+LEFT_CTX    = MAX_TOKS // 2   # 256 tokens of left context
+
 # Masking fraction grid — matches partial_masking_noise_map.py exactly
 ALPHA_GRID = [0.0, 0.05, 0.10, 0.20, 0.30, 0.40, 0.50,
               0.60, 0.70, 0.80, 0.90, 0.95, 1.0]
@@ -204,6 +207,38 @@ def apply_partial_masking(input_ids: torch.Tensor,
 
     return ids
 
+# ── Centered tokenisation window ─────────────────────────────────────────────
+
+def build_centered_window(tokenizer, original_code: str,
+                           mask_char: int, gt_name: str,
+                           mask_id: int) -> tuple:
+    """
+    Build a 512-token input centered on the identifier.
+
+    Tokenises prefix and suffix separately, keeps last LEFT_CTX prefix tokens
+    and first (MAX_TOKS - LEFT_CTX - 1) suffix tokens, inserts <|mask|> at
+    the join point.  target_idx is the exact position of the mask token.
+    """
+    prefix_text = original_code[:mask_char]
+    suffix_text = original_code[mask_char + len(gt_name):]
+
+    prefix_ids = tokenizer.encode(prefix_text, add_special_tokens=False)
+    suffix_ids = tokenizer.encode(suffix_text, add_special_tokens=False)
+
+    right_ctx  = MAX_TOKS - LEFT_CTX - 1
+    prefix_win = prefix_ids[-LEFT_CTX:]
+    suffix_win = suffix_ids[:right_ctx]
+
+    bos = ([tokenizer.bos_token_id]
+           if getattr(tokenizer, "bos_token_id", None) is not None else [])
+
+    token_seq  = bos + prefix_win + [mask_id] + suffix_win
+    target_idx = len(bos) + len(prefix_win)
+
+    input_ids = torch.tensor([token_seq], dtype=torch.long).to(DEVICE)
+    return input_ids, target_idx
+
+
 # ── Data loading ───────────────────────────────────────────────────────────────
 
 def load_data(data_path: str, max_samples: int = None) -> list:
@@ -251,29 +286,15 @@ def probe_sample(tokenizer, model, mask_id,
                  run_id: int,
                  rng: random.Random) -> list:
     """
-    Sweep α for a single sample with the ORIGINAL (gt) name in place.
+    Sweep α from 0 to 1 for a single sample.
 
-    Returns a list of result dicts — one per α value.
+    Uses a CENTERED 512-token window so [MASK] is always at position LEFT_CTX,
+    regardless of how long the surrounding file is.
     """
-    # Tokenise the full original code
-    enc = tokenizer(
-        original_code,
-        return_tensors="pt",
-        truncation=True,
-        max_length=MAX_TOKS,
+    # Build the centered window once; reuse for all α levels
+    base_ids, target_idx = build_centered_window(
+        tokenizer, original_code, mask_char, gt_name, mask_id
     )
-    input_ids      = enc["input_ids"].to(DEVICE)
-    seq_len        = input_ids.shape[1]
-
-    # Approximate target token index via prefix-length (same as partial_masking_noise_map.py)
-    prefix     = original_code[:mask_char]
-    prefix_ids = tokenizer.encode(prefix, add_special_tokens=False)
-    target_idx = min(len(prefix_ids), seq_len - 2)
-
-    # Place <|mask|> at the target position — the model never "sees" the original token;
-    # it must predict it from context. This is how α=0.0 and higher are comparable.
-    base_ids = input_ids.clone()
-    base_ids[0, target_idx] = mask_id
 
     results = []
     for alpha in ALPHA_GRID:
