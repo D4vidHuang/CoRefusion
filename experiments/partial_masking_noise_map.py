@@ -65,9 +65,12 @@ import torch.nn.functional as F
 from datetime import datetime
 from tqdm import tqdm
 
-# ── mock torchvision (not needed but some model loaders import it) ────────
-import types
-sys.modules.setdefault("torchvision", types.ModuleType("torchvision"))
+# ── Remove any broken torchvision mock BEFORE importing transformers ──────
+# transformers checks torchvision.__spec__ via importlib; a bare ModuleType
+# has __spec__=None which raises ValueError. Solution: don't mock it at all —
+# just let transformers handle the missing package gracefully on its own.
+if "torchvision" in sys.modules and sys.modules["torchvision"].__spec__ is None:
+    del sys.modules["torchvision"]
 
 from transformers import AutoTokenizer, AutoModel
 
