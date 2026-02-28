@@ -93,24 +93,20 @@ MAX_TOKS    = 512
 # suffix gets MAX_TOKS - LEFT_CTX - 1 tokens.
 LEFT_CTX    = MAX_TOKS // 2   # = 256 tokens of left context
 
-# Code-smell vocabulary — single-char loops, generic short names
-SMELL_VOCAB = {
-    "x", "y", "z", "a", "b", "c", "n", "k", "v",
-    "i", "j", "l", "m",
-    "tmp", "temp", "res", "val", "ret", "obj",
-    "data", "buf", "str", "idx", "num", "cnt",
-    "foo", "bar", "baz", "result", "value", "item",
-    "myVar", "myval", "flag",
+# Code-smell probe vocabulary — deliberately generic / overloaded names
+# organised by severity to match partial_masking_noise_map.py
+SMELL_PROBES = {
+    "severe":   ["x", "a", "n", "i"],
+    "moderate": ["tmp", "val", "foo", "res"],
+    "mild":     ["myVar", "temp1", "result1", "value1"],
 }
+
+# Flat list for easy iteration
+ALL_SMELLS = [s for names in SMELL_PROBES.values() for s in names]
 
 # ── Model Registry ─────────────────────────────────────────────────────────────
 
 MODEL_REGISTRY = {
-    "DiffuCoder-7B-Instruct": {
-        "id":         "apple/DiffuCoder-7B-Instruct",
-        "type":       "diffucoder",
-        "mask_token": "<|mask|>",
-    },
     "DiffuCoder-7B-Base": {
         "id":         "apple/DiffuCoder-7B-Base",
         "type":       "diffucoder",
@@ -123,21 +119,16 @@ MODEL_REGISTRY = {
     },
 }
 
-# ── Identifier classification ──────────────────────────────────────────────────
+# ── Identifier length classification (for gt_name only) ──────────────────────
 
-def classify_identifier(name: str) -> str:
+def gt_category(name: str) -> str:
     """
-    Classify a developer-written identifier into one of three buckets.
+    Classify the ground-truth name by length as a proxy for specificity.
 
-    SMELL   — in the predefined smell vocabulary (generic / over-used names)
-    SPECIFIC— long compound name (>=12 chars), inherently domain-specific
-    AVERAGE — everything in between (included for completeness)
+    SPECIFIC : >= 12 chars  — long compound names, highly domain-specific
+    AVERAGE  :  2–11 chars  — moderate names (the majority in the benchmark)
     """
-    if name.lower() in SMELL_VOCAB or name in SMELL_VOCAB:
-        return "SMELL"
-    if len(name) >= 12:
-        return "SPECIFIC"
-    return "AVERAGE"
+    return "SPECIFIC" if len(name) >= 12 else "AVERAGE"
 
 # ── Model utilities ────────────────────────────────────────────────────────────
 
@@ -298,54 +289,62 @@ def run_experiment(target_models=None, max_samples=None,
             continue
 
         results = []
+        rng = random.Random(42)  # reproducible smell probe selection
 
         for row in tqdm(data, desc=f"  {model_name}"):
             masked_code = row["masked_code"]
             gt_name     = row["target"]
-            category    = classify_identifier(gt_name)
+            gt_cat      = gt_category(gt_name)
 
-            # Ground-truth character offset of the identifier
             mask_char = masked_code.find("[MASK]")
             if mask_char == -1:
                 continue
 
-            # Restore the original identifier (remove [MASK] placeholder)
+            # Original code with the correct identifier restored
             original_code = masked_code.replace("[MASK]", gt_name, 1)
 
-            # ── Build CENTERED window: [MASK] always at LEFT_CTX ────────────
-            # This is the critical fix vs. left-aligned truncation which
-            # silently clamps 93% of samples to target_idx = 510 (wrong!).
-            gt_tok_ids  = tokenizer.encode(gt_name, add_special_tokens=False)
-            gt_token_id = gt_tok_ids[0] if gt_tok_ids else (tokenizer.unk_token_id or 0)
-
+            # Build the centered 512-token window (mask at LEFT_CTX = 256)
+            # The window is built around the gt_name position and REUSED
+            # for all probes so context is IDENTICAL across gt and smells.
             try:
                 masked_input, target_idx = build_centered_window(
                     tokenizer, original_code, mask_char, gt_name, mask_id
                 )
-            except Exception as e:
+            except Exception:
                 continue
 
-            # ── Forward pass ─────────────────────────────────────────────────
-            try:
-                logits  = single_forward(model, masked_input)
-                metrics = metrics_at_position(logits, target_idx, gt_token_id)
-            except Exception as e:
-                continue
+            # ── Probes: ground-truth + one representative per severity ────────
+            probes = [("gt", gt_name)]
+            for sev, names in SMELL_PROBES.items():
+                probes.append((f"smell_{sev}", rng.choice(names)))
 
-            results.append({
-                "id":            row["id"],
-                "gt_name":       gt_name,
-                "category":      category,
-                "target_idx":    target_idx,
-                **metrics,
-            })
+            for probe_type, probe_name in probes:
+                probe_tok_ids = tokenizer.encode(probe_name, add_special_tokens=False)
+                probe_tok_id  = probe_tok_ids[0] if probe_tok_ids else (tokenizer.unk_token_id or 0)
+
+                try:
+                    logits  = single_forward(model, masked_input)
+                    metrics = metrics_at_position(logits, target_idx, probe_tok_id)
+                except Exception:
+                    continue
+
+                results.append({
+                    "id":         row["id"],
+                    "gt_name":    gt_name,
+                    "gt_category": gt_cat,
+                    "probe_type": probe_type,
+                    "probe_name": probe_name,
+                    "target_idx": target_idx,
+                    **metrics,
+                })
 
         # ── Save per-model CSV ───────────────────────────────────────────────
+        os.makedirs(RESULTS_DIR, exist_ok=True)
         out_file = os.path.join(
             RESULTS_DIR, f"overconfidence_{model_name}_{timestamp}.csv"
         )
-        fieldnames = ["id", "gt_name", "category", "target_idx",
-                      "base_entropy", "base_rank", "base_prob"]
+        fieldnames = ["id", "gt_name", "gt_category", "probe_type", "probe_name",
+                      "target_idx", "base_entropy", "base_rank", "base_prob"]
         with open(out_file, "w", newline="", encoding="utf-8") as f:
             writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()
@@ -353,27 +352,38 @@ def run_experiment(target_models=None, max_samples=None,
 
         # ── Per-model summary ────────────────────────────────────────────────
         df = pd.DataFrame(results)
+
         print(f"\n  --- Over-confidence Trap Summary  ({model_name}) ---")
-        print(f"  {'Category':<12} {'N':>6} {'Mean Rank':>10} {'Mean Prob':>10} {'Mean Entropy':>14}")
-        print(f"  {'-'*56}")
-        for cat, grp in df.groupby("category"):
-            print(f"  {cat:<12} {len(grp):>6} "
+        print(f"  KEY: same context window, different probe token → fair comparison")
+        print(f"  {'probe_type':<20} {'N':>5} {'Mean Rank':>10} {'Mean Prob':>11} {'Mean Entropy':>13}")
+        print(f"  {'-'*63}")
+        for ptype, grp in df.groupby("probe_type", sort=False):
+            print(f"  {ptype:<20} {len(grp):>5} "
                   f"{grp['base_rank'].mean():>10.1f} "
-                  f"{grp['base_prob'].mean():>10.6f} "
-                  f"{grp['base_entropy'].mean():>14.6f}")
+                  f"{grp['base_prob'].mean():>11.6f} "
+                  f"{grp['base_entropy'].mean():>13.4f}")
+
+        # ── Sub-table: by gt_category ────────────────────────────────────────
+        print(f"\n  GT category breakdown:")
+        print(f"  {'gt_category':<12} {'probe_type':<20} {'Mean Rank':>10}")
+        print(f"  {'-'*46}")
+        for (cat, ptype), grp in df.groupby(["gt_category", "probe_type"], sort=False):
+            print(f"  {cat:<12} {ptype:<20} {grp['base_rank'].mean():>10.1f}")
 
         print(f"\n  Results → {out_file}")
+
+        # Global summary row
+        gt_rank     = df.loc[df.probe_type=="gt",           "base_rank"].mean()
+        sev_rank    = df.loc[df.probe_type=="smell_severe",  "base_rank"].mean()
+        mod_rank    = df.loc[df.probe_type=="smell_moderate","base_rank"].mean()
+        mild_rank   = df.loc[df.probe_type=="smell_mild",    "base_rank"].mean()
         all_summaries.append({
-            "model": model_name,
-            "n_smell":    len(df[df.category == "SMELL"]),
-            "n_specific": len(df[df.category == "SPECIFIC"]),
-            "n_average":  len(df[df.category == "AVERAGE"]),
-            "mean_rank_smell":    df.loc[df.category=="SMELL",    "base_rank"].mean(),
-            "mean_rank_specific": df.loc[df.category=="SPECIFIC", "base_rank"].mean(),
-            "mean_prob_smell":    df.loc[df.category=="SMELL",    "base_prob"].mean(),
-            "mean_prob_specific": df.loc[df.category=="SPECIFIC", "base_prob"].mean(),
-            "mean_ent_smell":     df.loc[df.category=="SMELL",    "base_entropy"].mean(),
-            "mean_ent_specific":  df.loc[df.category=="SPECIFIC", "base_entropy"].mean(),
+            "model":               model_name,
+            "n_samples":           df["id"].nunique(),
+            "mean_rank_gt":        gt_rank,
+            "mean_rank_severe":    sev_rank,
+            "mean_rank_moderate":  mod_rank,
+            "mean_rank_mild":      mild_rank,
         })
 
         if hf_repo:
@@ -390,14 +400,19 @@ def run_experiment(target_models=None, max_samples=None,
         pd.DataFrame(all_summaries).to_csv(summary_file, index=False)
         print(f"\n  Global summary → {summary_file}")
 
-        print(f"\n{'='*62}")
+        print(f"\n{'='*68}")
         print("  OVER-CONFIDENCE TRAP: FINAL SUMMARY")
-        print(f"  {'Model':<30} {'Smell Rank':>12} {'Specific Rank':>14}")
-        print(f"  {'-'*60}")
+        print("  Hypothesis: smell probes should have LOWER rank (model more confident)")
+        print("  than the gt (specific) name — because generics are over-represented")
+        print("  in training data and fit almost any context.")
+        print(f"  {'Model':<32} {'GT Rank':>9} {'Severe':>9} {'Moderate':>10} {'Mild':>8}")
+        print(f"  {'-'*72}")
         for s in all_summaries:
-            print(f"  {s['model']:<30} "
-                  f"{s['mean_rank_smell']:>12.1f} "
-                  f"{s['mean_rank_specific']:>14.1f}")
+            print(f"  {s['model']:<32} "
+                  f"{s['mean_rank_gt']:>9.1f} "
+                  f"{s['mean_rank_severe']:>9.1f} "
+                  f"{s['mean_rank_moderate']:>10.1f} "
+                  f"{s['mean_rank_mild']:>8.1f}")
 
         if hf_repo:
             upload_to_hf(summary_file, hf_repo, hf_token)
