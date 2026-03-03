@@ -389,11 +389,24 @@ def run_experiment(target_models=None, max_samples=None, repeats=1, seed=42,
                 gt_toks      = tokenizer.encode(gt_name, add_special_tokens=False)
                 gt_token_id  = gt_toks[0] if gt_toks else (tokenizer.unk_token_id or 0)
 
+                # Build smell probes, guarding against tokenization collision:
+                # e.g. 'nPredicates' → first subword is 'n' = smell_severe 'n'
+                # If all candidates in a tier collide with gt, skip that tier.
                 smell_probe_ids = {}
                 for sev, names in SMELL_PROBES.items():
-                    name = rng.choice(names)
-                    toks = tokenizer.encode(name, add_special_tokens=False)
-                    smell_probe_ids[sev] = (name, toks[0] if toks else (tokenizer.unk_token_id or 0))
+                    candidates = list(names)   # copy so we can shuffle
+                    rng.shuffle(candidates)
+                    chosen_name, chosen_id = None, None
+                    for cand in candidates:
+                        toks = tokenizer.encode(cand, add_special_tokens=False)
+                        cand_id = toks[0] if toks else (tokenizer.unk_token_id or 0)
+                        if cand_id != gt_token_id:
+                            chosen_name, chosen_id = cand, cand_id
+                            break
+                    if chosen_name is None:
+                        # All candidates in this tier collide — skip tier
+                        continue
+                    smell_probe_ids[sev] = (chosen_name, chosen_id)
 
                 # ── PASS 0: α=0 forward pass (no extra context masking) ───────
                 # Needed to determine gt_rank for regime classification.
