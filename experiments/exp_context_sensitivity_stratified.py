@@ -119,6 +119,10 @@ LEFT_CTX    = MAX_TOKS // 2        # 256 tokens — centered window
 THRESH_LOW_DEFAULT  = 200
 THRESH_HIGH_DEFAULT = 1000
 
+# Diffusion steps — lower = faster inference, slight quality trade-off.
+# 32 steps is enough for single-position logit probing.
+NUM_STEPS = 32
+
 # Alpha sweep grid — mirrors partial_masking_noise_map.py
 ALPHA_GRID = [0.0, 0.05, 0.10, 0.20, 0.30, 0.40, 0.50,
               0.60, 0.70, 0.80, 0.90, 0.95, 1.0]
@@ -161,13 +165,30 @@ def load_model(model_id: str, mask_token: str):
         torch_dtype=torch.bfloat16 if DEVICE == "cuda" else torch.float32,
     ).to(DEVICE).eval()
     mask_id = tokenizer.convert_tokens_to_ids(mask_token)
+    # Reduce internal diffusion steps for faster logit probing.
+    # DiffuCoder uses generation_config.steps; patch it here as well as
+    # passing num_steps= at call time so both code paths are covered.
+    if hasattr(model, "generation_config") and model.generation_config is not None:
+        if hasattr(model.generation_config, "steps"):
+            model.generation_config.steps = NUM_STEPS
     return tokenizer, model, mask_id
 
 
-def single_forward(model, input_ids: torch.Tensor) -> torch.Tensor:
-    """Single forward pass — returns logits [1, seq, vocab]."""
+def single_forward(model, input_ids: torch.Tensor,
+                   num_steps: int = NUM_STEPS) -> torch.Tensor:
+    """Single forward pass — returns logits [1, seq, vocab].
+
+    num_steps controls internal diffusion iterations for models that expose
+    this parameter (DiffuCoder, DreamCoder). Lower = faster.
+    """
     with torch.no_grad():
-        out = model(input_ids=input_ids, attention_mask=None)
+        try:
+            out = model(input_ids=input_ids,
+                        attention_mask=None,
+                        num_steps=num_steps)
+        except TypeError:
+            # Model does not accept num_steps in forward() — fall back.
+            out = model(input_ids=input_ids, attention_mask=None)
     if hasattr(out, "logits"):
         return out.logits
     if isinstance(out, tuple):

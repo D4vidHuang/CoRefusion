@@ -101,6 +101,10 @@ LEFT_CTX    = MAX_TOKS // 2      # 256 tokens of left context (centered window)
 THRESH_LOW_DEFAULT  = 200
 THRESH_HIGH_DEFAULT = 1000
 
+# Diffusion steps — set low for fast logit probing (single position).
+# 32 steps is sufficient; the default 256 is ~8x slower with minimal gain.
+NUM_STEPS = 32
+
 # Smell probe vocabulary (identical tiers to partial_masking_noise_map.py)
 SMELL_PROBES = {
     "severe":   ["x", "a", "n", "i"],
@@ -135,12 +139,27 @@ def load_model(model_id: str, mask_token: str):
         torch_dtype=torch.bfloat16 if DEVICE == "cuda" else torch.float32,
     ).to(DEVICE).eval()
     mask_id = tokenizer.convert_tokens_to_ids(mask_token)
+    # Patch generation_config so diffusion_generate also respects NUM_STEPS
+    if hasattr(model, "generation_config") and model.generation_config is not None:
+        if hasattr(model.generation_config, "steps"):
+            model.generation_config.steps = NUM_STEPS
     return tokenizer, model, mask_id
 
 
-def single_forward(model, input_ids) -> torch.Tensor:
+def single_forward(model, input_ids,
+                   num_steps: int = NUM_STEPS) -> torch.Tensor:
+    """Forward pass returning logits [1, seq, vocab].
+
+    Tries to pass num_steps to limit internal diffusion iterations
+    (DiffuCoder / DreamCoder). Falls back gracefully if not supported.
+    """
     with torch.no_grad():
-        out = model(input_ids=input_ids, attention_mask=None)
+        try:
+            out = model(input_ids=input_ids,
+                        attention_mask=None,
+                        num_steps=num_steps)
+        except TypeError:
+            out = model(input_ids=input_ids, attention_mask=None)
     if hasattr(out, "logits"):
         return out.logits
     if isinstance(out, tuple):
