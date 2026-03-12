@@ -1,9 +1,20 @@
 # Ignore subdirectories in external_repos
 external_repos/*/
+
+# OS junk
 .DS_Store
-__pycache__
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Results (generated data, not source-controlled)
 results/.DS_Store
 results/*
+
+# Experiment junk
 experiments/.DS_Store
 
-misc.ipynb
+# Notebooks (local only)
+notebooks/misc.ipynb
