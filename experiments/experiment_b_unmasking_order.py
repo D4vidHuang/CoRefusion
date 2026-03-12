@@ -122,7 +122,7 @@ def main():
         print(f"Dataset load error: {e}. Ensure path is correct.")
         return
     
-    df = df.head(100)
+    df = df.head(20)
     
     token_results = []
 

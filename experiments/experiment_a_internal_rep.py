@@ -125,7 +125,7 @@ def main():
         return
     
     # Run test on smaller subset (e.g. 100 samples)
-    df = df.head(100)
+    df = df.head(20)
     all_hidden_states = []
 
     print("Extracting Internal Representations...")

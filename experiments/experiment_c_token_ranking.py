@@ -122,8 +122,8 @@ def main():
         print(f"Dataset load error: {e}. Ensure path is correct.")
         return
     
-    # Process head 50 samples
-    df = df.head(50)
+    # Process head 20 samples
+    df = df.head(20)
     
     token_results = []
 
