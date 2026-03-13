@@ -61,8 +61,8 @@ def get_num_transfer_tokens(mask_index, steps):
 def add_gumbel_noise(logits, temperature):
     if temperature == 0:
         return logits
-    logits = logits.to(torch.float64)
-    noise = torch.rand_like(logits, dtype=torch.float64)
+    logits = logits.to(torch.float32)
+    noise = torch.rand_like(logits, dtype=torch.float32)
     gumbel_noise = (- torch.log(noise)) ** temperature
     return logits.exp() / gumbel_noise
 
@@ -130,100 +130,110 @@ def main():
 
     print("Extracting Internal Representations...")
     for idx, row in tqdm(df.iterrows(), total=len(df)):
-        sample_id = row['id']
-        masked_code = str(row['masked_code'])
-        target_name = str(row['target']).strip()
-        
-        if '[MASK]' not in masked_code:
-            continue
-            
-        code_smell = masked_code.replace("[MASK]", SMELL_NAME)
-        code_gt = masked_code.replace("[MASK]", target_name)
-        
-        conditions = [('smelly', code_smell, SMELL_NAME), ('gt', code_gt, target_name)]
-        
-        for cond_label, code_str, token_name in conditions:
-            # Tokenize Condition Text
-            inputs = tokenizer(code_str, return_tensors="pt").to(DEVICE)
-            input_ids = inputs.input_ids
-            attention_mask = inputs.attention_mask
-            
-            # Locate condition token
-            target_toks = tokenizer.encode(token_name, add_special_tokens=False)
-            target_pos = find_subsequence_indices(input_ids[0].tolist(), target_toks)
-            
-            if target_pos is None:
-                # Add a leading space if initial tokenization missed
-                target_toks_space = tokenizer.encode(" " + token_name, add_special_tokens=False)
-                target_pos = find_subsequence_indices(input_ids[0].tolist(), target_toks_space)
-                
-            if target_pos is None:
+        try:
+            sample_id = row['id']
+            masked_code = str(row['masked_code'])
+            target_name = str(row['target']).strip()
+
+            if '[MASK]' not in masked_code:
                 continue
-                
-            start_idx, end_idx = target_pos
-            
-            # -----------------------------------------------------------------
-            # 内部表征分析 Method 1: Cross-Layer activations (Zero Diffusion) 
-            #   Often 'denoising steps' are confused with layers in standard LM representations.
-            # -----------------------------------------------------------------
-            with torch.no_grad():
-                outputs = model(input_ids, attention_mask=attention_mask.bool(), output_hidden_states=True)
-                # Average embedded token representations at target position
-                layers_hs = [hs[0, start_idx:end_idx, :].mean(dim=0).cpu().numpy() for hs in outputs.hidden_states]
-                
-            for layer_i, hs_val in enumerate(layers_hs):
-                all_hidden_states.append({
-                    'sample_id': sample_id,
-                    'condition': cond_label,
-                    'step': f"layer_{layer_i}",
-                    'hidden_state': hs_val
-                })
-            
-            # -----------------------------------------------------------------
-            # 内部表征分析 Method 2: Denoising Step Trajectory (Discrete Diffusion)
-            #   We fix the smell/GT token position as input condition, and fully
-            #   MASK the surrounding context. Over T steps, as the context is 
-            #   denoised, we capture the internal state of the smell/GT token.
-            # -----------------------------------------------------------------
-            x = input_ids.clone()
-            context_mask = torch.ones_like(x, dtype=torch.bool)
-            context_mask[0, start_idx:end_idx] = False # keep smell/GT fixed!
-            # Do NOT mask special tokens if applicable, but for code sequences it's fine.
-            x[context_mask] = mask_token_id 
-            
-            num_transfer_tokens = get_num_transfer_tokens(context_mask, TOTAL_STEPS)
-            
-            for step_i in range(TOTAL_STEPS):
+
+            code_smell = masked_code.replace("[MASK]", SMELL_NAME)
+            code_gt = masked_code.replace("[MASK]", target_name)
+
+            conditions = [('smelly', code_smell, SMELL_NAME), ('gt', code_gt, target_name)]
+
+            for cond_label, code_str, token_name in conditions:
+                # Tokenize Condition Text
+                inputs = tokenizer(code_str, return_tensors="pt").to(DEVICE)
+                input_ids = inputs.input_ids
+                attention_mask = inputs.attention_mask
+
+                # Locate condition token
+                target_toks = tokenizer.encode(token_name, add_special_tokens=False)
+                target_pos = find_subsequence_indices(input_ids[0].tolist(), target_toks)
+
+                if target_pos is None:
+                    # Add a leading space if initial tokenization missed
+                    target_toks_space = tokenizer.encode(" " + token_name, add_special_tokens=False)
+                    target_pos = find_subsequence_indices(input_ids[0].tolist(), target_toks_space)
+
+                if target_pos is None:
+                    continue
+
+                start_idx, end_idx = target_pos
+
+                # -----------------------------------------------------------------
+                # 内部表征分析 Method 1: Cross-Layer activations (Zero Diffusion) 
+                #   Often 'denoising steps' are confused with layers in standard LM representations.
+                # -----------------------------------------------------------------
                 with torch.no_grad():
-                    current_mask_index = (x == mask_token_id)
-                    diff_outputs = model(x, attention_mask=attention_mask.bool(), output_hidden_states=True)
-                    
-                    # Capture the Condition Token's LAST LAYER hidden state at step T
-                    step_token_hs = diff_outputs.hidden_states[-1][0, start_idx:end_idx, :].mean(dim=0).cpu().numpy()
-                    
+                    outputs = model(input_ids, attention_mask=attention_mask.bool(), output_hidden_states=True)
+                    # Average embedded token representations at target position
+                    layers_hs = [hs[0, start_idx:end_idx, :].mean(dim=0).float().cpu().numpy() for hs in outputs.hidden_states]
+
+                for layer_i, hs_val in enumerate(layers_hs):
                     all_hidden_states.append({
                         'sample_id': sample_id,
                         'condition': cond_label,
-                        'step': f"diff_step_{step_i}",
-                        'hidden_state': step_token_hs
+                        'step': f"layer_{layer_i}",
+                        'hidden_state': hs_val
                     })
-                    
-                    # Compute next step via discrete Gumbel diffusion
-                    if current_mask_index.any():
-                        logits = diff_outputs.logits
-                        logits_with_noise = add_gumbel_noise(logits, temperature=0.3)
-                        x0 = torch.argmax(logits_with_noise, dim=-1)
-                        p_all = F.softmax(logits.float(), dim=-1)
-                        x0_p = torch.squeeze(torch.gather(p_all, dim=-1, index=torch.unsqueeze(x0, -1)), -1)
-                        x0 = torch.where(current_mask_index, x0, x)
-                        confidence = torch.where(current_mask_index, x0_p, torch.tensor(-np.inf, device=DEVICE))
-                        
-                        transfer_index = torch.zeros_like(x0, dtype=torch.bool)
-                        k = num_transfer_tokens[0, step_i].item() if num_transfer_tokens.shape[1] > step_i else 0
-                        if k > 0:
-                            _, sel = torch.topk(confidence[0], k=int(k))
-                            transfer_index[0, sel] = True
-                            x[transfer_index] = x0[transfer_index]
+
+                # -----------------------------------------------------------------
+                # 内部表征分析 Method 2: Denoising Step Trajectory (Discrete Diffusion)
+                #   We fix the smell/GT token position as input condition, and fully
+                #   MASK the surrounding context. Over T steps, as the context is 
+                #   denoised, we capture the internal state of the smell/GT token.
+                # -----------------------------------------------------------------
+                x = input_ids.clone()
+                context_mask = torch.ones_like(x, dtype=torch.bool)
+                context_mask[0, start_idx:end_idx] = False # keep smell/GT fixed!
+                # Do NOT mask special tokens if applicable, but for code sequences it's fine.
+                x[context_mask] = mask_token_id 
+
+                num_transfer_tokens = get_num_transfer_tokens(context_mask, TOTAL_STEPS)
+
+                for step_i in range(TOTAL_STEPS):
+                    with torch.no_grad():
+                        current_mask_index = (x == mask_token_id)
+                        diff_outputs = model(x, attention_mask=attention_mask.bool(), output_hidden_states=True)
+
+                        # Capture the Condition Token's LAST LAYER hidden state at step T
+                        step_token_hs = diff_outputs.hidden_states[-1][0, start_idx:end_idx, :].mean(dim=0).float().cpu().numpy()
+
+                        all_hidden_states.append({
+                            'sample_id': sample_id,
+                            'condition': cond_label,
+                            'step': f"diff_step_{step_i}",
+                            'hidden_state': step_token_hs
+                        })
+
+                        # Compute next step via discrete Gumbel diffusion
+                        if current_mask_index.any():
+                            logits = diff_outputs.logits
+                            logits_with_noise = add_gumbel_noise(logits, temperature=0.3)
+                            x0 = torch.argmax(logits_with_noise, dim=-1)
+                            p_all = F.softmax(logits.float(), dim=-1)
+                            x0_p = torch.squeeze(torch.gather(p_all, dim=-1, index=torch.unsqueeze(x0, -1)), -1)
+                            x0 = torch.where(current_mask_index, x0, x)
+                            confidence = torch.where(current_mask_index, x0_p, torch.tensor(-np.inf, device=DEVICE))
+
+                            transfer_index = torch.zeros_like(x0, dtype=torch.bool)
+                            k = num_transfer_tokens[0, step_i].item() if num_transfer_tokens.shape[1] > step_i else 0
+                            if k > 0:
+                                _, sel = torch.topk(confidence[0], k=int(k))
+                                transfer_index[0, sel] = True
+                                x[transfer_index] = x0[transfer_index]
+
+        except Exception as e:
+            if 'out of memory' in str(e).lower() or 'oom' in str(e).lower():
+                print(f'\n[OOM] Skipping sample {row.get("id", "unknown")}...')
+                torch.cuda.empty_cache()
+                import gc; gc.collect()
+                continue
+            else:
+                raise e
 
     # Analysis Export
     print("\nSaving results and creating PCA/Similarity metrics...")

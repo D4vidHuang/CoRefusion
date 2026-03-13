@@ -31,7 +31,7 @@ if not hasattr(torch.ops, 'torchvision'):
 # Configuration
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 MODEL_NAME = "apple/DiffuCoder-7B-Instruct"
-DATA_PATH = "data/test.csv"
+DATA_PATH = "CoRefusion/data/test.csv"
 RESULTS_DIR = "results"
 TOTAL_STEPS = 64
 CONFIDENCE_THRESHOLD = 0.8  # Threshold for "first confident step"
@@ -48,8 +48,8 @@ def get_num_transfer_tokens(mask_index, steps):
 def add_gumbel_noise(logits, temperature):
     if temperature == 0:
         return logits
-    logits = logits.to(torch.float64)
-    noise = torch.rand_like(logits, dtype=torch.float64)
+    logits = logits.to(torch.float32)
+    noise = torch.rand_like(logits, dtype=torch.float32)
     gumbel_noise = (- torch.log(noise)) ** temperature
     return logits.exp() / gumbel_noise
 
@@ -128,85 +128,95 @@ def main():
 
     print("Running Unmasking Order Analysis...")
     for idx, row in tqdm(df.iterrows(), total=len(df)):
-        sample_id = row['id']
-        masked_code = str(row['masked_code'])
-        
-        if '[MASK]' not in masked_code:
-            continue
-            
-        DUMMY_SMELL_ID = "SMELL_DUMMY_TOKEN"
-        code_str = masked_code.replace("[MASK]", DUMMY_SMELL_ID)
-        
-        inputs = tokenizer(code_str, return_tensors="pt").to(DEVICE)
-        input_ids = inputs.input_ids
-        attention_mask = inputs.attention_mask
-        
-        identifier_mask, id_groups = get_java_identifier_metadata(code_str, tokenizer, input_ids)
-        identifier_mask = identifier_mask.to(DEVICE)
-        
-        if not identifier_mask.any():
-            continue
-            
-        x = input_ids.clone()
-        x[0, identifier_mask] = mask_token_id
-        
-        num_transfer_tokens = get_num_transfer_tokens(identifier_mask.unsqueeze(0), TOTAL_STEPS)
-        
-        seq_len = x.shape[1]
-        flip_steps = {i: -1 for i in range(seq_len)}
-        first_confident_steps = {i: -1 for i in range(seq_len)}
-        
-        for step_i in range(TOTAL_STEPS):
-            with torch.no_grad():
-                current_mask_index = (x == mask_token_id)
-                if not current_mask_index.any():
-                    break
-                    
-                diff_outputs = model(x, attention_mask=attention_mask.bool())
-                logits = diff_outputs.logits
-                logits_with_noise = add_gumbel_noise(logits, temperature=0.3)
-                x0 = torch.argmax(logits_with_noise, dim=-1)
-                
-                p_all = F.softmax(logits.float(), dim=-1)
-                x0_p = torch.squeeze(torch.gather(p_all, dim=-1, index=torch.unsqueeze(x0, -1)), -1)
-                
-                for i in range(seq_len):
-                    if current_mask_index[0, i].item():
-                        if x0_p[0, i].item() > CONFIDENCE_THRESHOLD and first_confident_steps[i] == -1:
-                            first_confident_steps[i] = step_i
-                
-                confidence = torch.where(current_mask_index, x0_p, torch.tensor(-np.inf, device=DEVICE))
-                
-                transfer_index = torch.zeros_like(x0, dtype=torch.bool)
-                k_val = num_transfer_tokens[0, step_i].item() if num_transfer_tokens.shape[1] > step_i else 0
-                if k_val > 0:
-                    k_val = min(k_val, current_mask_index.sum().item())
-                    _, sel = torch.topk(confidence[0], k=int(k_val))
-                    transfer_index[0, sel] = True
-                    x[transfer_index] = x0[transfer_index]
-                    
-                    for i in sel.tolist():
-                        if flip_steps[i] == -1:
-                            flip_steps[i] = step_i
+        try:
+            sample_id = row['id']
+            masked_code = str(row['masked_code'])
 
-        for group in id_groups:
-            name = group['name']
-            indices = group['indices']
-            is_smell = (name == DUMMY_SMELL_ID)
-            
-            valid_flips = [flip_steps[i] for i in indices if flip_steps.get(i, -1) != -1]
-            valid_conf = [first_confident_steps[i] for i in indices if first_confident_steps.get(i, -1) != -1]
-            
-            avg_flip = sum(valid_flips) / len(valid_flips) if valid_flips else TOTAL_STEPS
-            avg_conf = sum(valid_conf) / len(valid_conf) if valid_conf else TOTAL_STEPS
-            
-            token_results.append({
-                'sample_id': sample_id,
-                'is_smell_token': is_smell,
-                'identifier_name': name,
-                'avg_flip_step': avg_flip,
-                'first_confident_step': avg_conf
-            })
+            if '[MASK]' not in masked_code:
+                continue
+
+            DUMMY_SMELL_ID = "SMELL_DUMMY_TOKEN"
+            code_str = masked_code.replace("[MASK]", DUMMY_SMELL_ID)
+
+            inputs = tokenizer(code_str, return_tensors="pt").to(DEVICE)
+            input_ids = inputs.input_ids
+            attention_mask = inputs.attention_mask
+
+            identifier_mask, id_groups = get_java_identifier_metadata(code_str, tokenizer, input_ids)
+            identifier_mask = identifier_mask.to(DEVICE)
+
+            if not identifier_mask.any():
+                continue
+
+            x = input_ids.clone()
+            x[0, identifier_mask] = mask_token_id
+
+            num_transfer_tokens = get_num_transfer_tokens(identifier_mask.unsqueeze(0), TOTAL_STEPS)
+
+            seq_len = x.shape[1]
+            flip_steps = {i: -1 for i in range(seq_len)}
+            first_confident_steps = {i: -1 for i in range(seq_len)}
+
+            for step_i in range(TOTAL_STEPS):
+                with torch.no_grad():
+                    current_mask_index = (x == mask_token_id)
+                    if not current_mask_index.any():
+                        break
+
+                    diff_outputs = model(x, attention_mask=attention_mask.bool())
+                    logits = diff_outputs.logits
+                    logits_with_noise = add_gumbel_noise(logits, temperature=0.3)
+                    x0 = torch.argmax(logits_with_noise, dim=-1)
+
+                    p_all = F.softmax(logits.float(), dim=-1)
+                    x0_p = torch.squeeze(torch.gather(p_all, dim=-1, index=torch.unsqueeze(x0, -1)), -1)
+
+                    for i in range(seq_len):
+                        if current_mask_index[0, i].item():
+                            if x0_p[0, i].item() > CONFIDENCE_THRESHOLD and first_confident_steps[i] == -1:
+                                first_confident_steps[i] = step_i
+
+                    confidence = torch.where(current_mask_index, x0_p, torch.tensor(-np.inf, device=DEVICE))
+
+                    transfer_index = torch.zeros_like(x0, dtype=torch.bool)
+                    k_val = num_transfer_tokens[0, step_i].item() if num_transfer_tokens.shape[1] > step_i else 0
+                    if k_val > 0:
+                        k_val = min(k_val, current_mask_index.sum().item())
+                        _, sel = torch.topk(confidence[0], k=int(k_val))
+                        transfer_index[0, sel] = True
+                        x[transfer_index] = x0[transfer_index]
+
+                        for i in sel.tolist():
+                            if flip_steps[i] == -1:
+                                flip_steps[i] = step_i
+
+            for group in id_groups:
+                name = group['name']
+                indices = group['indices']
+                is_smell = (name == DUMMY_SMELL_ID)
+
+                valid_flips = [flip_steps[i] for i in indices if flip_steps.get(i, -1) != -1]
+                valid_conf = [first_confident_steps[i] for i in indices if first_confident_steps.get(i, -1) != -1]
+
+                avg_flip = sum(valid_flips) / len(valid_flips) if valid_flips else TOTAL_STEPS
+                avg_conf = sum(valid_conf) / len(valid_conf) if valid_conf else TOTAL_STEPS
+
+                token_results.append({
+                    'sample_id': sample_id,
+                    'is_smell_token': is_smell,
+                    'identifier_name': name,
+                    'avg_flip_step': avg_flip,
+                    'first_confident_step': avg_conf
+                })
+
+        except Exception as e:
+            if 'out of memory' in str(e).lower() or 'oom' in str(e).lower():
+                print(f'\n[OOM] Skipping sample {row.get("id", "unknown")}...')
+                torch.cuda.empty_cache()
+                import gc; gc.collect()
+                continue
+            else:
+                raise e
 
     df_results = pd.DataFrame(token_results)
     
