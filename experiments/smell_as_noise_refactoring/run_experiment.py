@@ -4,17 +4,17 @@ import pandas as pd
 import numpy as np
 import random
 import csv
+import argparse
 from tqdm import tqdm
 from datetime import datetime
 from utils import load_model, load_data, find_token_indices, BAD_NAMES
 
 # Configuration
 MODEL_NAME = "diffucoder"
-DATA_PATH = "data/test_filtered_1024.csv"
+DATA_PATH = "data/test.csv"
 OUTPUT_DIR = "experiments/smell_as_noise_refactoring/results"
 NOISE_LEVELS = [0.1, 0.3, 0.5, 0.7, 0.9]
 TRIALS_PER_LEVEL = 3  # Reduce trials to save time, increase for final run
-LIMIT_SAMPLES = 20    # Number of samples to process
 
 def apply_random_mask(input_ids, mask_token_id, noise_level):
     """
@@ -33,6 +33,13 @@ def apply_random_mask(input_ids, mask_token_id, noise_level):
     return masked_input, indices.tolist()
 
 def run_experiment():
+    parser = argparse.ArgumentParser(description="Run Refactoring Threshold Experiment")
+    parser.add_argument("--debug", action="store_true", help="Run with only 20 samples for verification")
+    args = parser.parse_args()
+
+    limit = 20 if args.debug else None
+    print(f"Running experiment with limit={limit} (Debug mode: {args.debug})")
+
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     
     # Load model
@@ -40,7 +47,7 @@ def run_experiment():
     mask_token_id = tokenizer.convert_tokens_to_ids(cfg['mask_token'])
     
     # Load data
-    df = load_data(DATA_PATH, limit=LIMIT_SAMPLES)
+    df = load_data(DATA_PATH, limit=limit)
     
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     results_file = os.path.join(OUTPUT_DIR, f"retention_rate_{timestamp}.csv")
