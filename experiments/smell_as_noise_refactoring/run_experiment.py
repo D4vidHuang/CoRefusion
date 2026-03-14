@@ -45,6 +45,8 @@ def run_experiment():
     # Load model
     model, tokenizer, cfg = load_model(MODEL_NAME)
     mask_token_id = tokenizer.convert_tokens_to_ids(cfg['mask_token'])
+    device = model.device
+    print(f"Running on device: {device}")
     
     # Load data
     df = load_data(DATA_PATH, limit=limit)
@@ -71,6 +73,25 @@ def run_experiment():
             # Select a random bad name for this sample
             bad_name = random.choice(BAD_NAMES)
             
+            # Truncate code if too long, centered around [MASK]
+            mask_pos = code_template.find('[MASK]')
+            if mask_pos != -1:
+                # Approximate 1024 tokens ~ 3000 chars. Use 2500 to be safe.
+                WINDOW_SIZE = 2500
+                code_len = len(code_template)
+                
+                if code_len > WINDOW_SIZE:
+                    start = max(0, mask_pos - WINDOW_SIZE // 2)
+                    end = min(code_len, start + WINDOW_SIZE)
+                    
+                    # Adjust if window is too small (e.g. mask at very end)
+                    if end - start < WINDOW_SIZE and start > 0:
+                        start = max(0, end - WINDOW_SIZE)
+                    
+                    # Apply truncation
+                    code_template = code_template[start:end]
+                    # Note: We don't update ground_truth or bad_name, just the context
+            
             # Prepare two conditions: Smelly and Clean
             conditions = [
                 ('smelly', code_template.replace('[MASK]', bad_name), bad_name, ground_truth),
@@ -80,8 +101,8 @@ def run_experiment():
             for cond_name, code, current_name, target_refactor_name in conditions:
                 # Tokenize
                 inputs = tokenizer(code, return_tensors="pt", truncation=True, max_length=1024)
-                input_ids = inputs.input_ids.to("cuda")
-                attention_mask = inputs.attention_mask.to("cuda")
+                input_ids = inputs.input_ids.to(device)
+                attention_mask = inputs.attention_mask.to(device)
                 
                 # Identify where the variable of interest is
                 # Note: Tokenization might split the name into multiple tokens.
@@ -117,6 +138,9 @@ def run_experiment():
                                 steps=32, # Fast generation for experiment
                                 temperature=0.0, # Deterministic filling preferred for stability check
                                 top_p=1.0,
+                                top_k=50, 
+                                alg="entropy", # Explicitly set algorithm to entropy to be safe
+                                alg_temp=0.,
                             )
                         
                         # Decode output

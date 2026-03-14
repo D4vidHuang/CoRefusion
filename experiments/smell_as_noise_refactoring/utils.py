@@ -39,8 +39,22 @@ def load_model(model_name="diffucoder"):
     
     cfg = MODELS[model_name]
     print(f"Loading {model_name} ({cfg['id']})...")
+    
+    # Determine device
+    if torch.cuda.is_available():
+        device = "cuda"
+        dtype = torch.bfloat16
+    elif torch.backends.mps.is_available():
+        device = "mps"
+        dtype = torch.float16 # MPS often prefers float16
+    else:
+        device = "cpu"
+        dtype = torch.float32 # CPU might not support half precision well
+        
+    print(f"Using device: {device}")
+    
     tokenizer = AutoTokenizer.from_pretrained(cfg['id'], trust_remote_code=True)
-    model = AutoModel.from_pretrained(cfg['id'], torch_dtype=torch.bfloat16, trust_remote_code=True).to("cuda").eval()
+    model = AutoModel.from_pretrained(cfg['id'], torch_dtype=dtype, trust_remote_code=True).to(device).eval()
     return model, tokenizer, cfg
 
 def load_data(path, limit=None):
@@ -56,23 +70,72 @@ def find_token_indices(tokenizer, input_ids, target_str):
     """
     Find the indices of the tokens corresponding to target_str in input_ids.
     Returns a list of (start, end) tuples.
-    Tries both the raw string and the string with a leading space.
+    
+    Robust strategy:
+    1. Decode all tokens individually.
+    2. Search for a contiguous sequence of tokens that reconstructs target_str.
     """
+    if not target_str:
+        return []
+        
     input_list = input_ids.tolist() if torch.is_tensor(input_ids) else input_ids
+    
+    # Decode each token individually to see what characters they contain
+    # Note: We use a special function to handle the Llama tokenizer's SPIECE_UNDERLINE ( )
+    token_texts = [tokenizer.decode([tid], skip_special_tokens=False) for tid in input_list]
+    
     indices = []
+    n = len(token_texts)
     
-    # Try multiple variations of the target string to account for tokenization differences
-    candidates = [target_str, " " + target_str]
+    # We search for a subsequence token_texts[i:j] such that "".join(token_texts[i:j]).replace(" ", "") == target_str
+    # But wait, exact reconstruction is tricky because of spaces.
+    # The target_str usually does NOT contain spaces (it's a variable name).
+    # But tokens might contain leading spaces.
     
-    for cand in candidates:
-        target_ids = tokenizer.encode(cand, add_special_tokens=False)
-        if not target_ids:
-            continue
+    # Optimization: Only start checking if the token contains the start of target_str
+    # This is O(N^2) in worst case but N is small (1024) and max token length for a var is small (~5).
+    
+    target_clean = target_str.strip()
+    
+    for i in range(n):
+        # Quick check: first char match
+        # The token text might start with ' ' (U+2581)
+        curr_text = token_texts[i].lstrip(' ') # Remove leading SPIECE_UNDERLINE
+        if not curr_text: continue
+        
+        # If the token doesn't even contain the start of our target (or isn't contained in it), skip
+        # Actually, a token like "get" might be the start of "getValue".
+        
+        current_reconstruction = ""
+        for j in range(i, min(i + 10, n)): # Assume variable name is not split into more than 10 tokens
+            # Add current token text
+            # We need to be careful about spaces. 
+            # If we are reconstructing a variable name, it should NOT have internal spaces.
+            # Llama tokens: " int", " my", "Var" -> " int", " myVar"
             
-        # Simple sliding window search
-        for i in range(len(input_list) - len(target_ids) + 1):
-            if input_list[i:i+len(target_ids)] == target_ids:
-                indices.append((i, i+len(target_ids)))
-    
-    # Remove duplicates and sort
+            part = token_texts[j]
+            # If it's the first token in our sequence, we ignore leading space
+            # If it's a subsequent token, it should NOT have a leading space if it's part of the same word.
+            # E.g. "my" + "Var". "Var" usually doesn't have space if it's "myVar".
+            # BUT: " decoded" + "Capacity". "Capacity" usually has no space.
+            
+            if j == i:
+                part_clean = part.lstrip(' ')
+            else:
+                if part.startswith(' '): 
+                    # If a subsequent token starts with space, it usually means a new word started.
+                    # So we should probably stop, UNLESS target_str actually has spaces (unlikely for var name).
+                    break
+                part_clean = part
+            
+            current_reconstruction += part_clean
+            
+            if current_reconstruction == target_clean:
+                indices.append((i, j + 1))
+                break
+            
+            # Optimization: if reconstruction is already not a prefix of target, stop
+            if not target_clean.startswith(current_reconstruction):
+                break
+                
     return sorted(list(set(indices)))
