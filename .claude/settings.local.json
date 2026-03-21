@@ -4,7 +4,9 @@
       "Bash(chmod:*)",
       "Bash(head:*)",
       "Bash(find:*)",
-      "Bash(python3:*)"
+      "Bash(python3:*)",
+      "Bash(ls:*)",
+      "Bash(python:*)"
     ]
   }
 }
