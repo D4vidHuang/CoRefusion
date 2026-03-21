@@ -11,31 +11,25 @@ Experiment design:
   • Dataset  : data/test.csv  (RefineID, Java variable renaming)
   • Models   : DiffuCoder-7B-Instruct, DreamCoder-7B-Instruct
   • Mask counts tested: [1, 2, 3, 4, 5]
-  • Diffusion steps  : 32  (fixed for all runs)
+  • Diffusion steps  : 32  (fixed)
   • Evaluation metrics:
-      1. Exact Match (EM)  – prediction == ground_truth (string exact)
+      1. Exact Match (EM)  – prediction == ground_truth
       2. LLM-as-Judge (LJ) – Qwen2.5-7B-Instruct judge (binary: 0/1)
 
-Implementation approach (matches benchmark_diffusion_models.py):
-  - Replace [MASK] with <|mask|> * k (concatenated, no spaces)
-  - Tokenise the whole code snippet directly (NO chat prompt)
-  - Run model.diffusion_generate() with max_new_tokens=1 so the model
-    denoises *in-place* without generating extra tokens
-  - Decode the ENTIRE denoised sequence
-  - Extract the filled identifier by anchoring on the surrounding context
-    (same extract_all_predictions logic as benchmark_diffusion_models.py)
+Memory management strategy:
+  - Diffusion model is loaded, used for ALL k values for that model, then
+    fully released before anything else loads.
+  - LLM judge is loaded AFTER the diffusion model is released; judging is
+    done in a second pass over the saved raw CSV.
+  - Every inference call explicitly deletes intermediate tensors and calls
+    torch.cuda.empty_cache() after each sample on a configurable cadence.
 
 Usage (from repo root):
-    # Full run, both models, mask counts 1-5, with LLM judge
     python experiments/1t5t_exp/part2_static_token_ablation.py \\
-        --data data/test.csv \\
-        --models both \\
-        --mask-counts 1 2 3 4 5 \\
-        --steps 32 \\
-        --judge-model Qwen/Qwen2.5-7B-Instruct \\
-        --max-samples 200
+        --data data/test.csv --models both --mask-counts 1 2 3 4 5 \\
+        --steps 32 --judge-model Qwen/Qwen2.5-7B-Instruct --max-samples 200
 
-    # EM-only (no judge, faster)
+    # EM-only (no judge, much faster)
     python experiments/1t5t_exp/part2_static_token_ablation.py --no-judge
 
     # Single model
@@ -103,6 +97,41 @@ MODEL_COLORS = {
     "DreamCoder-7B": "#ff6b6b",
 }
 
+# How often (every N samples) to call torch.cuda.empty_cache() during inference
+CACHE_CLEAR_INTERVAL = 20
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Memory helpers
+# ─────────────────────────────────────────────────────────────────────────────
+
+def release_model(model, tokenizer):
+    """Fully release a model from GPU memory."""
+    try:
+        del model
+    except Exception:
+        pass
+    try:
+        del tokenizer
+    except Exception:
+        pass
+    if torch.cuda.is_available():
+        torch.cuda.synchronize()
+        torch.cuda.empty_cache()
+    gc.collect()
+    if torch.cuda.is_available():
+        allocated = torch.cuda.memory_allocated() / 1e9
+        print(f"  [mem] GPU allocated after release: {allocated:.2f} GB")
+
+
+def vram_info() -> str:
+    if not torch.cuda.is_available():
+        return "CPU"
+    alloc = torch.cuda.memory_allocated() / 1e9
+    reserved = torch.cuda.memory_reserved() / 1e9
+    total = torch.cuda.get_device_properties(0).total_memory / 1e9
+    return f"alloc={alloc:.1f}GB  reserved={reserved:.1f}GB  total={total:.1f}GB"
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Data loading
@@ -128,18 +157,10 @@ def load_data(data_path: str, max_samples: int | None = None) -> list[dict]:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Prediction extraction  (copied from benchmark_diffusion_models.py)
+# Prediction extraction  (mirrors benchmark_diffusion_models.py)
 # ─────────────────────────────────────────────────────────────────────────────
 
 def extract_all_predictions(full_code: str, masked_code: str) -> list[str]:
-    """
-    Extract predictions for ALL [MASK] locations in masked_code.
-
-    Aligns the denoised full_code with the original masked_code by anchoring
-    on the context surrounding each [MASK] position.
-
-    Returns a list of predicted identifiers (one per [MASK]).
-    """
     parts = masked_code.split("[MASK]")
     if len(parts) <= 1:
         return []
@@ -151,24 +172,17 @@ def extract_all_predictions(full_code: str, masked_code: str) -> list[str]:
         pre  = parts[i]
         post = parts[i + 1]
 
-        # Use short anchors for robustness
         pre_anchor  = pre.strip()[-30:]  if len(pre.strip())  > 30 else pre.strip()
         post_anchor = post.strip()[:30]  if len(post.strip()) > 30 else post.strip()
 
-        # 1. Locate pre_anchor in full_code
         if pre_anchor:
             idx_start = full_code.find(pre_anchor, current_search_start)
             idx_start = (idx_start + len(pre_anchor)) if idx_start != -1 else current_search_start
         else:
             idx_start = current_search_start
 
-        # 2. Locate post_anchor
-        if post_anchor:
-            idx_end = full_code.find(post_anchor, idx_start)
-        else:
-            idx_end = -1
+        idx_end = full_code.find(post_anchor, idx_start) if post_anchor else -1
 
-        # 3. Extract the gap
         if idx_end != -1:
             gap_content = full_code[idx_start:idx_end].strip()
             current_search_start = idx_end
@@ -176,7 +190,6 @@ def extract_all_predictions(full_code: str, masked_code: str) -> list[str]:
             gap_content = full_code[idx_start: idx_start + 60].strip()
             current_search_start = idx_start + 60
 
-        # 4. Extract the first valid Java identifier
         match = re.search(r'[a-zA-Z_$][a-zA-Z0-9_$]*', gap_content)
         predictions.append(match.group(0) if match else gap_content[:20])
 
@@ -191,30 +204,25 @@ def run_diffusion_inference(model, tokenizer, masked_code: str,
                             mask_token: str, k: int,
                             steps: int) -> tuple[str, str]:
     """
-    Replace [MASK] with k concatenated mask tokens, run diffusion in-place,
-    decode the entire denoised sequence, and return (full_code, primary_pred).
+    Replace [MASK] with k * mask_token (no spaces), tokenise directly (no
+    chat template), diffusion_generate in-place (max_new_tokens=1), decode
+    the entire output sequence, extract prediction via context anchoring.
 
-    Key design notes (matching benchmark_diffusion_models.py):
-      • mask tokens are concatenated WITHOUT spaces: mask_token * k
-      • max_new_tokens=1  →  no new tokens generated; model denoises existing ones
-      • The WHOLE sequence is decoded (not just new tokens)
-      • Prediction is extracted by anchoring on surrounding context
+    All intermediate tensors are explicitly deleted to minimise VRAM retention.
     """
-    # Step 1: Replace placeholder
     multi_mask = mask_token * k
     input_code = masked_code.replace("[MASK]", multi_mask)
 
-    # Step 2: Tokenise the full snippet (no chat template)
-    inputs      = tokenizer(input_code, return_tensors="pt")
-    input_ids   = inputs.input_ids.to(model.device)
-    attn_mask   = inputs.attention_mask.to(model.device)
+    inputs    = tokenizer(input_code, return_tensors="pt")
+    input_ids = inputs.input_ids.to(model.device)
+    attn_mask = inputs.attention_mask.to(model.device)
+    del inputs  # free CPU tensor immediately
 
-    # Step 3: Diffusion generate — denoise in-place
     with torch.no_grad():
         output = model.diffusion_generate(
             input_ids,
             attention_mask=attn_mask,
-            max_new_tokens=1,       # no extra tokens; denoising only
+            max_new_tokens=1,
             steps=steps,
             temperature=0.3,
             top_p=0.95,
@@ -222,15 +230,15 @@ def run_diffusion_inference(model, tokenizer, masked_code: str,
             alg_temp=0.,
         )
 
-    # Step 4: Decode ENTIRE denoised sequence
     gen_ids   = output.sequences[0] if hasattr(output, "sequences") else output[0]
     full_code = tokenizer.decode(gen_ids, skip_special_tokens=True)
 
-    # Step 5: Extract predictions by anchoring on masked_code context
-    preds = extract_all_predictions(full_code, masked_code)
-    primary_pred = preds[0] if preds else ""
+    # Free GPU tensors immediately
+    del input_ids, attn_mask, output, gen_ids
+    # (no torch.cuda.empty_cache() here — called on interval in outer loop)
 
-    return full_code, primary_pred
+    preds = extract_all_predictions(full_code, masked_code)
+    return full_code, (preds[0] if preds else "")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -245,7 +253,7 @@ JUDGE_SYSTEM = (
     "Rules:\n"
     "1. ACCEPTABLE if the prediction conveys the same concept as the ground truth, "
     "even if the exact string differs "
-    "(e.g. 'bufSize' vs 'bufferSize' are both fine for a buffer-size variable).\n"
+    "(e.g. 'bufSize' vs 'bufferSize' are both acceptable for a buffer-size variable).\n"
     "2. NOT ACCEPTABLE if the prediction clearly describes a different concept.\n"
     "3. Single-letter names are usually NOT ACCEPTABLE unless obviously correct "
     "(e.g. loop counter 'i', 'j').\n"
@@ -260,8 +268,8 @@ JUDGE_SYSTEM = (
 
 
 def _apply_chat_template(tokenizer, user_text: str) -> str:
-    msgs = [{"role": "system",  "content": JUDGE_SYSTEM},
-            {"role": "user",    "content": user_text}]
+    msgs = [{"role": "system", "content": JUDGE_SYSTEM},
+            {"role": "user",   "content": user_text}]
     try:
         return tokenizer.apply_chat_template(msgs, tokenize=False,
                                              add_generation_prompt=True)
@@ -281,28 +289,24 @@ def parse_verdict(text: str) -> int:
             return 1
         if line.lower() in ("no", "not acceptable", "incorrect", "wrong"):
             return 0
-    return -1  # parse failure
+    return -1
 
 
 def judge_one(judge_tok, judge_model,
               masked_code: str, prediction: str, ground_truth: str) -> int:
-    """Return 1 (acceptable), 0 (not acceptable), or -1 (parse failure)."""
-    # Build code context (center ≈2000 chars around the mask position)
-    mask_pos = masked_code.find("[MASK]")
+    """Run judge on a single sample. Returns 1/0/-1. All tensors freed after call."""
+    mask_pos       = masked_code.find("[MASK]")
     code_with_pred = masked_code.replace("[MASK]", prediction, 1)
-    half = 1000
-    start = max(0, mask_pos - half)
-    end   = min(len(code_with_pred), mask_pos + len(prediction) + half)
+    half   = 1000
+    start  = max(0, mask_pos - half)
+    end    = min(len(code_with_pred), mask_pos + len(prediction) + half)
     context = ("..." if start > 0 else "") + code_with_pred[start:end] + \
               ("..." if end < len(code_with_pred) else "")
 
     user_text = (
-        f"Code context (the predicted name replaces the masked identifier):\n"
-        f"```java\n{context}\n```\n\n"
+        f"Code context:\n```java\n{context}\n```\n\n"
         f"Ground-truth variable name: `{ground_truth}`\n"
         f"Predicted variable name:    `{prediction}`\n\n"
-        f"Is the predicted name semantically acceptable given the code context and "
-        f"the ground truth?\n"
         f"Reply with EXACTLY one line: VERDICT: 1   or   VERDICT: 0"
     )
     prompt = _apply_chat_template(judge_tok, user_text)
@@ -314,127 +318,198 @@ def judge_one(judge_tok, judge_model,
             pad_token_id=(judge_tok.eos_token_id or judge_tok.pad_token_id or 0),
         )
     new_ids = out[0][inp["input_ids"].shape[1]:]
-    raw = judge_tok.decode(new_ids, skip_special_tokens=True).strip()
+    raw     = judge_tok.decode(new_ids, skip_special_tokens=True).strip()
+
+    # Free judge tensors immediately
+    del inp, out, new_ids
+    # Caller is responsible for periodic empty_cache()
+
     return parse_verdict(raw)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Core experiment loop: one (model × k) combination
+# Phase 1: Diffusion inference for all k values of ONE model
 # ─────────────────────────────────────────────────────────────────────────────
 
-def run_one_config(model_key: str, k: int, data: list[dict],
-                   steps: int, timestamp: str,
-                   judge_tok=None, judge_model=None) -> pd.DataFrame:
+def run_diffusion_phase(model_key: str, k_values: list[int],
+                        data: list[dict], steps: int,
+                        timestamp: str) -> list[str]:
     """
-    Run inference for one (model, k) configuration and save raw results.
-    Returns a DataFrame with per-sample results.
+    Load the diffusion model ONCE, run inference for every k in k_values,
+    save one raw CSV per k, then fully release the model.
+
+    Returns the list of saved raw CSV paths.
     """
     cfg        = MODELS_REGISTRY[model_key]
     model_name = cfg["name"]
     model_id   = cfg["id"]
     mask_token = cfg["mask_token"]
 
-    print(f"\n{'─'*65}")
-    print(f"  {model_name}  |  k={k} mask token(s)  |  steps={steps}")
-    print(f"  mask_token: '{mask_token}'  →  repeated {k}x = '{mask_token * k}'")
-    print(f"{'─'*65}")
+    print(f"\n{'═'*65}")
+    print(f"  DIFFUSION PHASE: {model_name}")
+    print(f"  k values: {k_values}  |  steps={steps}")
+    print(f"  {vram_info()}")
+    print(f"{'═'*65}")
 
-    # ── Load diffusion model ───────────────────────────────────────────────
     t0 = time.time()
-    print(f"  Loading {model_id} …")
     tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
     model = AutoModel.from_pretrained(
         model_id,
         torch_dtype=torch.bfloat16 if DEVICE == "cuda" else torch.float32,
         trust_remote_code=True,
     ).to(DEVICE).eval()
-    print(f"  Model loaded in {time.time() - t0:.1f}s")
+    print(f"  Model loaded in {time.time() - t0:.1f}s  |  {vram_info()}")
 
-    # ── Inference loop ──────────────────────────────────────────────────────
-    rows    = []
-    correct = 0
-    errors  = 0
+    saved_paths = []
 
-    for row in tqdm(data, desc=f"  {model_name} k={k}"):
-        item_id      = row["id"]
-        masked_code  = row["masked_code"]
-        ground_truth = row["ground_truth"]
+    try:
+        for k in k_values:
+            print(f"\n  ── k={k} {'─'*50}")
+            rows    = []
+            correct = 0
+            errors  = 0
 
-        try:
-            full_code, prediction = run_diffusion_inference(
-                model, tokenizer, masked_code, mask_token, k, steps
-            )
-            exact_match = int(prediction == ground_truth)
-            if exact_match:
-                correct += 1
+            for i, row in enumerate(tqdm(data, desc=f"  {model_name} k={k}")):
+                item_id      = row["id"]
+                masked_code  = row["masked_code"]
+                ground_truth = row["ground_truth"]
 
-            # ── LLM judge (skip if exact match to save compute) ────────────
-            if judge_tok is not None and not exact_match:
-                # Skip clearly invalid predictions before calling LLM
-                if prediction and re.search(r"[a-zA-Z]", prediction):
-                    verdict = judge_one(judge_tok, judge_model,
-                                        masked_code, prediction, ground_truth)
+                try:
+                    _, prediction = run_diffusion_inference(
+                        model, tokenizer, masked_code, mask_token, k, steps
+                    )
+                    exact_match = int(prediction == ground_truth)
+                    if exact_match:
+                        correct += 1
+
+                    rows.append({
+                        "id":           item_id,
+                        "model":        model_name,
+                        "mask_count":   k,
+                        "steps":        steps,
+                        "ground_truth": ground_truth,
+                        "prediction":   prediction,
+                        "exact_match":  exact_match,
+                        "llm_verdict":  -2,  # not judged yet
+                    })
+                except Exception as e:
+                    errors += 1
+                    rows.append({
+                        "id":           item_id,
+                        "model":        model_name,
+                        "mask_count":   k,
+                        "steps":        steps,
+                        "ground_truth": ground_truth,
+                        "prediction":   "",
+                        "exact_match":  0,
+                        "llm_verdict":  -1,
+                        "error":        str(e),
+                    })
+                    if errors <= 5:
+                        print(f"    Error on sample {item_id}: {e}")
+                    elif errors == 6:
+                        print("    ... suppressing further error messages")
+
+                # Periodic VRAM flush
+                if (i + 1) % CACHE_CLEAR_INTERVAL == 0 and torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+
+            # Final cache clear for this k
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+
+            raw_df   = pd.DataFrame(rows)
+            safe_nm  = model_name.replace("-", "_")
+            raw_path = os.path.join(RESULTS_DIR,
+                                    f"part2_raw_{safe_nm}_{k}tok_{timestamp}.csv")
+            raw_df.to_csv(raw_path, index=False)
+            saved_paths.append(raw_path)
+
+            em = raw_df["exact_match"].mean()
+            print(f"\n  EM={em:.4f}  ({correct}/{len(data)})  errors={errors}")
+            print(f"  → Saved: {raw_path}")
+
+    finally:
+        # Always release diffusion model — even if an exception occurred midway
+        print(f"\n  Releasing {model_name} from GPU …")
+        release_model(model, tokenizer)
+        print(f"  {vram_info()}")
+
+    return saved_paths
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Phase 2: LLM-as-Judge pass over saved raw CSVs
+# ─────────────────────────────────────────────────────────────────────────────
+
+def run_judge_phase(raw_paths: list[str], judge_model_id: str,
+                    test_data_lookup: dict) -> None:
+    """
+    Load the judge model ONCE (after diffusion model has been released),
+    iterate over saved raw CSVs, fill in llm_verdict, overwrite in place.
+    """
+    print(f"\n{'═'*65}")
+    print(f"  JUDGE PHASE: {judge_model_id}")
+    print(f"  {vram_info()}")
+    print(f"{'═'*65}")
+
+    t0        = time.time()
+    judge_tok = AutoTokenizer.from_pretrained(judge_model_id, trust_remote_code=True)
+    judge_mdl = AutoModelForCausalLM.from_pretrained(
+        judge_model_id,
+        torch_dtype=torch.bfloat16 if DEVICE == "cuda" else torch.float32,
+        device_map="auto" if DEVICE == "cuda" else None,
+        trust_remote_code=True,
+    ).eval()
+    print(f"  Judge loaded in {time.time() - t0:.1f}s  |  {vram_info()}")
+
+    try:
+        for raw_path in raw_paths:
+            print(f"\n  Judging: {os.path.basename(raw_path)}")
+            df       = pd.read_csv(raw_path)
+            verdicts = []
+
+            for i, row in enumerate(tqdm(df.itertuples(), total=len(df),
+                                         desc="    judging")):
+                exact_match = int(row.exact_match)
+                prediction  = str(row.prediction) if hasattr(row, "prediction") else ""
+
+                if exact_match:
+                    verdicts.append(1)   # exact match → automatically acceptable
+                elif not prediction or not re.search(r"[a-zA-Z]", prediction):
+                    verdicts.append(0)   # invalid prediction
                 else:
-                    verdict = 0
-            elif exact_match:
-                verdict = 1   # exact match → automatically acceptable
-            else:
-                verdict = -2  # judge disabled
+                    # Fall back to masked_code from test_data_lookup
+                    row_id      = str(row.id)
+                    masked_code = test_data_lookup.get(row_id, {}).get("masked_code", "")
+                    ground_truth = str(row.ground_truth)
+                    try:
+                        v = judge_one(judge_tok, judge_mdl,
+                                      masked_code, prediction, ground_truth)
+                    except Exception as e:
+                        v = -1
+                    verdicts.append(v)
 
-            rows.append({
-                "id":           item_id,
-                "model":        model_name,
-                "mask_count":   k,
-                "steps":        steps,
-                "ground_truth": ground_truth,
-                "prediction":   prediction,
-                "exact_match":  exact_match,
-                "llm_verdict":  verdict,
-            })
+                # Periodic VRAM flush
+                if (i + 1) % CACHE_CLEAR_INTERVAL == 0 and torch.cuda.is_available():
+                    torch.cuda.empty_cache()
 
-        except Exception as e:
-            errors += 1
-            rows.append({
-                "id":           item_id,
-                "model":        model_name,
-                "mask_count":   k,
-                "steps":        steps,
-                "ground_truth": ground_truth,
-                "prediction":   "",
-                "exact_match":  0,
-                "llm_verdict":  -1,
-                "error":        str(e),
-            })
-            if errors <= 5:
-                print(f"    Error on sample {item_id}: {e}")
-            elif errors == 6:
-                print("    ... suppressing further error messages")
+            df["llm_verdict"] = verdicts
+            df.to_csv(raw_path, index=False)
 
-    # ── Save raw results ────────────────────────────────────────────────────
-    raw_df    = pd.DataFrame(rows)
-    safe_name = model_name.replace("-", "_")
-    raw_path  = os.path.join(RESULTS_DIR,
-                             f"part2_raw_{safe_name}_{k}tok_{timestamp}.csv")
-    raw_df.to_csv(raw_path, index=False)
+            # Final cache clear for this file
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
 
-    em_mean = raw_df["exact_match"].mean()
-    # LLM judge mean excludes "disabled" (-2) and parse failures (-1)
-    valid_lj = raw_df[raw_df["llm_verdict"] >= 0]["llm_verdict"]
-    lj_mean  = valid_lj.mean() if len(valid_lj) > 0 else float("nan")
+            valid_v = [v for v in verdicts if v >= 0]
+            lj_mean = sum(valid_v) / len(valid_v) if valid_v else float("nan")
+            print(f"    LJ={lj_mean:.4f}  ({sum(1 for v in valid_v if v==1)}/{len(valid_v)})")
+            print(f"    → Updated: {raw_path}")
 
-    print(f"\n  EM={em_mean:.4f}  ({correct}/{len(data)} correct)")
-    if not np.isnan(lj_mean):
-        print(f"  LJ={lj_mean:.4f}  ({valid_lj.sum()}/{len(valid_lj)} acceptable)")
-    print(f"  Errors: {errors}")
-    print(f"  → Saved: {raw_path}")
-
-    # ── Cleanup diffusion model ─────────────────────────────────────────────
-    del model, tokenizer
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
-    gc.collect()
-
-    return raw_df
+    finally:
+        print(f"\n  Releasing judge model …")
+        release_model(judge_mdl, judge_tok)
+        print(f"  {vram_info()}")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -442,14 +517,13 @@ def run_one_config(model_key: str, k: int, data: list[dict],
 # ─────────────────────────────────────────────────────────────────────────────
 
 def plot_results(summary_df: pd.DataFrame, timestamp: str):
-    """Bar charts: EM and LLM-Judge accuracy vs number of mask tokens."""
-    models    = summary_df["model"].unique()
-    k_vals    = sorted(summary_df["mask_count"].unique())
-    x         = np.arange(len(k_vals))
-    width     = 0.35
-    n_models  = len(models)
-    offsets   = np.linspace(-width * (n_models - 1) / 2,
-                             width * (n_models - 1) / 2, n_models)
+    models   = summary_df["model"].unique()
+    k_vals   = sorted(summary_df["mask_count"].unique())
+    x        = np.arange(len(k_vals))
+    width    = 0.35
+    n_models = len(models)
+    offsets  = np.linspace(-width * (n_models - 1) / 2,
+                            width * (n_models - 1) / 2, n_models)
 
     fig, axes = plt.subplots(1, 2, figsize=(14, 5))
 
@@ -508,22 +582,17 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
-    parser.add_argument("--data",        default="data/test.csv",
-                        help="Path to RefineID test.csv (default: data/test.csv)")
+    parser.add_argument("--data",        default="data/test.csv")
     parser.add_argument("--models",      default="both",
                         choices=["diffucoder", "dreamcoder", "both"])
     parser.add_argument("--mask-counts", nargs="+", type=int,
-                        default=[1, 2, 3, 4, 5],
-                        help="List of k values to test (default: 1 2 3 4 5)")
-    parser.add_argument("--steps",       type=int, default=32,
-                        help="Number of diffusion steps (default: 32)")
-    parser.add_argument("--max-samples", type=int, default=None,
-                        help="Evaluate only first N samples (for quick tests)")
+                        default=[1, 2, 3, 4, 5])
+    parser.add_argument("--steps",       type=int, default=32)
+    parser.add_argument("--max-samples", type=int, default=None)
     parser.add_argument("--judge-model", type=str,
-                        default="Qwen/Qwen2.5-7B-Instruct",
-                        help="HF model ID for LLM judge")
+                        default="Qwen/Qwen2.5-7B-Instruct")
     parser.add_argument("--no-judge",    action="store_true",
-                        help="Skip LLM judge – evaluate Exact Match only")
+                        help="Skip LLM judge – EM evaluation only.")
     args = parser.parse_args()
 
     os.makedirs(RESULTS_DIR, exist_ok=True)
@@ -538,50 +607,45 @@ def main():
     print(f"  Mask counts     : {args.mask_counts}")
     print(f"  Models          : {args.models}")
     print(f"  LLM judge       : {'DISABLED' if args.no_judge else args.judge_model}")
-    print(f"  Device          : {DEVICE}")
+    print(f"  Device          : {DEVICE}  |  {vram_info()}")
 
     # ── Load data ──────────────────────────────────────────────────────────
     print(f"\nLoading data from {args.data} …")
     data = load_data(args.data, args.max_samples)
     print(f"  {len(data):,} samples loaded.")
 
-    # ── Optional: load LLM judge once (shared across all (model, k) runs) ─
-    judge_tok, judge_model = None, None
-    if not args.no_judge:
-        judge_id = JUDGE_REGISTRY.get(args.judge_model, args.judge_model)
-        print(f"\nLoading judge model: {judge_id} …")
-        judge_tok = AutoTokenizer.from_pretrained(judge_id, trust_remote_code=True)
-        judge_model = AutoModelForCausalLM.from_pretrained(
-            judge_id,
-            torch_dtype=torch.bfloat16 if DEVICE == "cuda" else torch.float32,
-            device_map="auto" if DEVICE == "cuda" else None,
-            trust_remote_code=True,
-        ).eval()
-        print("  Judge model loaded.")
+    # Build a lookup dict for judge phase (id → row)
+    test_data_lookup = {str(r["id"]): r for r in data}
 
-    # ── Determine which diffusion models to run ────────────────────────────
     if args.models == "both":
         model_keys = ["diffucoder", "dreamcoder"]
     else:
         model_keys = [args.models]
 
-    all_raw_dfs = []
+    # ── Phase 1: Diffusion inference (one model at a time, ALL k values) ──
+    # Key memory insight: load model ONCE per model_key, run all k values,
+    # then fully release BEFORE loading the next model or the judge.
+    all_raw_paths: list[str] = []
 
     for model_key in model_keys:
-        for k in args.mask_counts:
-            raw_df = run_one_config(
-                model_key=model_key,
-                k=k,
-                data=data,
-                steps=args.steps,
-                timestamp=timestamp,
-                judge_tok=judge_tok,
-                judge_model=judge_model,
-            )
-            all_raw_dfs.append(raw_df)
+        paths = run_diffusion_phase(
+            model_key=model_key,
+            k_values=args.mask_counts,
+            data=data,
+            steps=args.steps,
+            timestamp=timestamp,
+        )
+        all_raw_paths.extend(paths)
+
+    # ── Phase 2: LLM judge (only after ALL diffusion models are released) ─
+    if not args.no_judge:
+        judge_id = JUDGE_REGISTRY.get(args.judge_model, args.judge_model)
+        run_judge_phase(all_raw_paths, judge_id, test_data_lookup)
 
     # ── Aggregate summary ──────────────────────────────────────────────────
-    combined = pd.concat(all_raw_dfs, ignore_index=True)
+    all_dfs = [pd.read_csv(p) for p in all_raw_paths]
+    combined = pd.concat(all_dfs, ignore_index=True)
+
     summary_rows = []
     for (model_name, k), grp in combined.groupby(["model", "mask_count"]):
         valid_lj = grp[grp["llm_verdict"] >= 0]["llm_verdict"]
@@ -602,26 +666,18 @@ def main():
     print("  PART 2 SUMMARY")
     print("=" * 65)
     print(summary_df.to_string(index=False))
-    print(f"\n  Full summary saved → {summary_path}")
+    print(f"\n  Summary saved → {summary_path}")
 
-    # ── Plot ───────────────────────────────────────────────────────────────
     if len(summary_df) > 0:
         plot_results(summary_df, timestamp)
 
-    # ── Cleanup judge ──────────────────────────────────────────────────────
-    if judge_model is not None:
-        del judge_model, judge_tok
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-        gc.collect()
-
-    # ── Print best k per model ────────────────────────────────────────────
+    # ── Print optimal k ──────────────────────────────────────────────────
     print("\n" + "=" * 65)
     print("  OPTIMAL MASK COUNT (k*)")
     print("=" * 65)
     for model_name in summary_df["model"].unique():
         sub = summary_df[summary_df["model"] == model_name]
-        best_em  = sub.loc[sub["exact_match"].idxmax()]
+        best_em = sub.loc[sub["exact_match"].idxmax()]
         print(f"\n  {model_name}:")
         print(f"    Best EM  → k={int(best_em['mask_count'])}  "
               f"EM={best_em['exact_match']:.4f}")

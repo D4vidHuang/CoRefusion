@@ -77,6 +77,9 @@ if not hasattr(torch.ops, "torchvision"):
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
+# How often (every N samples) to call torch.cuda.empty_cache() during inference
+CACHE_CLEAR_INTERVAL = 20
+
 MODELS_REGISTRY = {
     "diffucoder": {
         "name": "DiffuCoder-7B",
@@ -112,6 +115,39 @@ JAVA_KEYWORDS = {
     "Object", "List", "ArrayList", "Map", "HashMap", "Set",
     "System", "Math", "Override",
 }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Memory helpers
+# ─────────────────────────────────────────────────────────────────────────────
+
+def release_model(model, tokenizer):
+    """Fully release a model from GPU memory."""
+    try:
+        del model
+    except Exception:
+        pass
+    try:
+        del tokenizer
+    except Exception:
+        pass
+    if torch.cuda.is_available():
+        torch.cuda.synchronize()
+        torch.cuda.empty_cache()
+    gc.collect()
+    if torch.cuda.is_available():
+        allocated = torch.cuda.memory_allocated() / 1e9
+        print(f"  [mem] GPU allocated after release: {allocated:.2f} GB")
+
+
+def vram_info() -> str:
+    if not torch.cuda.is_available():
+        return "CPU"
+    alloc    = torch.cuda.memory_allocated() / 1e9
+    reserved = torch.cuda.memory_reserved() / 1e9
+    total    = torch.cuda.get_device_properties(0).total_memory / 1e9
+    return f"alloc={alloc:.1f}GB  reserved={reserved:.1f}GB  total={total:.1f}GB"
+
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -267,26 +303,23 @@ def run_diffusion_inference(model, tokenizer, masked_code: str,
                             mask_token: str, k: int, steps: int) -> tuple:
     """
     Replace [MASK] with k concatenated mask tokens (NO spaces between tokens),
-    tokenise the whole code directly (NO chat template),
-    run diffusion_generate with max_new_tokens=1 (denoising only),
-    decode the ENTIRE output sequence, then extract predictions via
-    context anchoring.
-
-    Returns (full_code, primary_prediction).
+    tokenise directly (NO chat template), denoise in-place (max_new_tokens=1),
+    decode the ENTIRE output sequence, extract prediction via context anchoring.
+    All intermediate GPU tensors deleted before return.
     """
-    # Concatenate without spaces — matches benchmark_diffusion_models.py
     multi_mask = mask_token * k
     input_code = masked_code.replace("[MASK]", multi_mask)
 
     inputs    = tokenizer(input_code, return_tensors="pt")
     input_ids = inputs.input_ids.to(model.device)
     attn_mask = inputs.attention_mask.to(model.device)
+    del inputs
 
     with torch.no_grad():
         output = model.diffusion_generate(
             input_ids,
             attention_mask=attn_mask,
-            max_new_tokens=1,   # denoising in-place, no new tokens
+            max_new_tokens=1,
             steps=steps,
             temperature=0.3,
             top_p=0.95,
@@ -297,8 +330,11 @@ def run_diffusion_inference(model, tokenizer, masked_code: str,
     gen_ids   = output.sequences[0] if hasattr(output, "sequences") else output[0]
     full_code = tokenizer.decode(gen_ids, skip_special_tokens=True)
 
+    del input_ids, attn_mask, output, gen_ids
+
     preds = extract_all_predictions(full_code, masked_code)
     return full_code, (preds[0] if preds else "")
+
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -342,6 +378,7 @@ def parse_verdict(text):
 
 
 def judge_one(jtok, jmodel, masked_code, prediction, ground_truth):
+    """Run judge on one sample. All intermediate tensors freed after call."""
     context = masked_code.replace("[MASK]", prediction)[:2000]
     user_text = (
         f"Code:\n```java\n{context}\n```\n\n"
@@ -358,8 +395,10 @@ def judge_one(jtok, jmodel, masked_code, prediction, ground_truth):
             pad_token_id=(jtok.eos_token_id or jtok.pad_token_id or 0),
         )
     new_ids = out[0][inp["input_ids"].shape[1]:]
-    raw = jtok.decode(new_ids, skip_special_tokens=True).strip()
+    raw     = jtok.decode(new_ids, skip_special_tokens=True).strip()
+    del inp, out, new_ids
     return parse_verdict(raw)
+
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -391,13 +430,19 @@ def load_data(data_path, max_samples=None):
 
 def run_strategy(model_key: str,
                  strategy_name: str,
-                 static_k: int | None,   # None → use dynamic strategy
+                 static_k,      # int or None → use dynamic strategy
                  df: pd.DataFrame,
                  steps: int,
-                 timestamp: str,
-                 judge_tok=None,
-                 judge_model=None) -> pd.DataFrame:
+                 timestamp: str) -> str:
+    """
+    Load the diffusion model, run inference for one (model, strategy),
+    save raw CSV, then FULLY RELEASE model before returning.
 
+    LLM judging is done in a separate pass (run_judge_phase_3) after all
+    diffusion models have been released.
+
+    Returns the path to the saved raw CSV.
+    """
     cfg        = MODELS_REGISTRY[model_key]
     model_name = cfg["name"]
     model_id   = cfg["id"]
@@ -405,9 +450,11 @@ def run_strategy(model_key: str,
 
     print(f"\n{'─'*60}")
     print(f"  {model_name}  |  strategy={strategy_name}  |  steps={steps}")
+    print(f"  {vram_info()}")
     print(f"{'─'*60}")
 
     # Load diffusion model
+    t0 = time.time()
     print(f"  Loading {model_id} …")
     tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
     model = AutoModel.from_pretrained(
@@ -415,96 +462,160 @@ def run_strategy(model_key: str,
         torch_dtype=torch.bfloat16 if DEVICE == "cuda" else torch.float32,
         trust_remote_code=True,
     ).to(DEVICE).eval()
+    print(f"  Loaded in {time.time() - t0:.1f}s  |  {vram_info()}")
 
     rows   = []
     errors = 0
-    for _, row in tqdm(df.iterrows(), total=len(df),
-                       desc=f"{model_name[:12]} {strategy_name}"):
-        sample_id    = row["id"]
-        masked_code  = str(row["masked_code"])
-        ground_truth = str(row["ground_truth"]).strip()
 
-        try:
-            # Determine k for this sample
-            if static_k is not None:
-                k = static_k
-            elif strategy_name == "dynamic_threshold":
-                k = strategy_threshold_heuristic(masked_code)
-            else:  # dynamic_context
-                k = strategy_context_naming_length(masked_code, tokenizer)
+    try:
+        for i, row_data in enumerate(tqdm(df.itertuples(), total=len(df),
+                                          desc=f"{model_name[:12]} {strategy_name}")):
+            sample_id    = row_data.id
+            masked_code  = str(row_data.masked_code)
+            ground_truth = str(row_data.ground_truth).strip()
 
-            # Run diffusion inference (same approach as benchmark_diffusion_models.py)
-            _full_code, prediction = run_diffusion_inference(
-                model, tokenizer, masked_code, mask_token, k, steps
-            )
-            exact_match = int(prediction == ground_truth)
+            try:
+                # Determine k for this sample
+                if static_k is not None:
+                    k = static_k
+                elif strategy_name == "dynamic_threshold":
+                    k = strategy_threshold_heuristic(masked_code)
+                else:  # dynamic_context
+                    k = strategy_context_naming_length(masked_code, tokenizer)
 
-            # LLM judge (skip if exact match to save compute)
-            if judge_tok is not None and not exact_match:
-                if prediction and re.search(r"[a-zA-Z]", prediction):
-                    verdict = judge_one(judge_tok, judge_model,
-                                        masked_code, prediction, ground_truth)
-                else:
-                    verdict = 0
-            elif exact_match:
-                verdict = 1    # exact match → automatically acceptable
-            else:
-                verdict = -2   # judge disabled
+                _full_code, prediction = run_diffusion_inference(
+                    model, tokenizer, masked_code, mask_token, k, steps
+                )
+                exact_match = int(prediction == ground_truth)
 
-            rows.append({
-                "id":           sample_id,
-                "model":        model_name,
-                "strategy":     strategy_name,
-                "dynamic_k":    k,
-                "steps":        steps,
-                "ground_truth": ground_truth,
-                "prediction":   prediction,
-                "exact_match":  exact_match,
-                "llm_verdict":  verdict,
-            })
+                rows.append({
+                    "id":           sample_id,
+                    "model":        model_name,
+                    "strategy":     strategy_name,
+                    "dynamic_k":    k,
+                    "steps":        steps,
+                    "ground_truth": ground_truth,
+                    "prediction":   prediction,
+                    "exact_match":  exact_match,
+                    "llm_verdict":  -2,  # will be filled in judge phase
+                })
 
-        except Exception as e:
-            errors += 1
-            rows.append({
-                "id":           sample_id,
-                "model":        model_name,
-                "strategy":     strategy_name,
-                "dynamic_k":    -1,
-                "steps":        steps,
-                "ground_truth": ground_truth,
-                "prediction":   "",
-                "exact_match":  0,
-                "llm_verdict":  -1,
-                "error":        str(e),
-            })
-            if errors <= 5:
-                print(f"    Error on sample {sample_id}: {e}")
-            elif errors == 6:
-                print("    ... suppressing further error messages")
+            except Exception as e:
+                errors += 1
+                rows.append({
+                    "id":           sample_id,
+                    "model":        model_name,
+                    "strategy":     strategy_name,
+                    "dynamic_k":    -1,
+                    "steps":        steps,
+                    "ground_truth": ground_truth,
+                    "prediction":   "",
+                    "exact_match":  0,
+                    "llm_verdict":  -1,
+                    "error":        str(e),
+                })
+                if errors <= 5:
+                    print(f"    Error on sample {sample_id}: {e}")
+                elif errors == 6:
+                    print("    ... suppressing further error messages")
 
-    raw_df = pd.DataFrame(rows)
-    safe_name = model_name.replace("-", "_")
+            # Periodic VRAM flush
+            if (i + 1) % CACHE_CLEAR_INTERVAL == 0 and torch.cuda.is_available():
+                torch.cuda.empty_cache()
+
+        # Final cache clear for this run
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
+    finally:
+        # Always release diffusion model, even on exception
+        print(f"  Releasing {model_name} …")
+        release_model(model, tokenizer)
+
+    raw_df   = pd.DataFrame(rows)
+    safe_nm  = model_name.replace("-", "_")
     out_path = os.path.join(RESULTS_DIR,
-                            f"part3_raw_{safe_name}_{strategy_name}_{timestamp}.csv")
+                            f"part3_raw_{safe_nm}_{strategy_name}_{timestamp}.csv")
     raw_df.to_csv(out_path, index=False)
 
-    valid   = raw_df[raw_df["llm_verdict"] >= 0]
     em_mean = raw_df["exact_match"].mean()
-    lj_mean = valid["llm_verdict"].mean() if len(valid) > 0 else float("nan")
     mean_k  = raw_df[raw_df["dynamic_k"] >= 0]["dynamic_k"].mean()
-    print(f"\n  EM={em_mean:.4f}  errors={errors}")
-    if not np.isnan(lj_mean):
-        print(f"  LJ={lj_mean:.4f}")
-    print(f"  mean_k={mean_k:.2f}")
+    print(f"  EM={em_mean:.4f}  errors={errors}  mean_k={mean_k:.2f}")
     print(f"  → Saved: {out_path}")
 
-    # Cleanup diffusion model (judge stays loaded)
-    del model, tokenizer
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
-    gc.collect()
+    return out_path
 
-    return raw_df
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Phase 2: LLM-as-Judge pass (after all diffusion models are released)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def run_judge_phase_3(raw_paths: list, judge_model_id: str,
+                     test_data_lookup: dict) -> None:
+    """
+    Load judge model ONCE (after all diffusion models are fully released),
+    fill llm_verdict in each raw CSV, overwrite files in place.
+    """
+    print(f"\n{'═'*60}")
+    print(f"  JUDGE PHASE: {judge_model_id}")
+    print(f"  {vram_info()}")
+    print(f"{'═'*60}")
+
+    t0        = time.time()
+    judge_tok = AutoTokenizer.from_pretrained(judge_model_id, trust_remote_code=True)
+    judge_mdl = AutoModelForCausalLM.from_pretrained(
+        judge_model_id,
+        torch_dtype=torch.bfloat16 if DEVICE == "cuda" else torch.float32,
+        device_map="auto" if DEVICE == "cuda" else None,
+        trust_remote_code=True,
+    ).eval()
+    print(f"  Judge loaded in {time.time() - t0:.1f}s  |  {vram_info()}")
+
+    try:
+        for raw_path in raw_paths:
+            print(f"\n  Judging: {os.path.basename(raw_path)}")
+            df       = pd.read_csv(raw_path)
+            verdicts = []
+
+            for i, row in enumerate(tqdm(df.itertuples(), total=len(df),
+                                         desc="    judging")):
+                exact_match = int(row.exact_match)
+                prediction  = str(getattr(row, "prediction", ""))
+
+                if exact_match:
+                    verdicts.append(1)
+                elif not prediction or not re.search(r"[a-zA-Z]", prediction):
+                    verdicts.append(0)
+                else:
+                    row_id       = str(row.id)
+                    masked_code  = test_data_lookup.get(row_id, {}).get("masked_code", "")
+                    ground_truth = str(row.ground_truth)
+                    try:
+                        v = judge_one(judge_tok, judge_mdl,
+                                      masked_code, prediction, ground_truth)
+                    except Exception:
+                        v = -1
+                    verdicts.append(v)
+
+                if (i + 1) % CACHE_CLEAR_INTERVAL == 0 and torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+
+            df["llm_verdict"] = verdicts
+            df.to_csv(raw_path, index=False)
+
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+
+            valid_v = [v for v in verdicts if v >= 0]
+            lj_mean = sum(valid_v) / len(valid_v) if valid_v else float("nan")
+            print(f"    LJ={lj_mean:.4f}  ({sum(1 for v in valid_v if v==1)}/{len(valid_v)})")
+            print(f"    → Updated: {raw_path}")
+
+    finally:
+        print("\n  Releasing judge model …")
+        release_model(judge_mdl, judge_tok)
+        print(f"  {vram_info()}")
+
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -625,10 +736,8 @@ def main():
     parser.add_argument("--data", default="data/test.csv")
     parser.add_argument("--models", default="both",
                         choices=["diffucoder", "dreamcoder", "both"])
-    parser.add_argument("--static-k", type=int, default=3,
-                        help="The static baseline k to compare against (default: 3).")
-    parser.add_argument("--part2-summary", type=str, default=None,
-                        help="Path to Part 2 summary CSV to auto-select best static k.")
+    parser.add_argument("--static-k", type=int, default=3)
+    parser.add_argument("--part2-summary", type=str, default=None)
     parser.add_argument("--steps", type=int, default=32)
     parser.add_argument("--max-samples", type=int, default=None)
     parser.add_argument("--judge-model", type=str,
@@ -636,15 +745,13 @@ def main():
     parser.add_argument("--no-judge", action="store_true")
     parser.add_argument("--strategies", nargs="+",
                         choices=["static", "dynamic_threshold", "dynamic_context"],
-                        default=["static", "dynamic_threshold", "dynamic_context"],
-                        help="Which strategies to run.")
+                        default=["static", "dynamic_threshold", "dynamic_context"])
     args = parser.parse_args()
 
     os.makedirs(RESULTS_DIR, exist_ok=True)
     os.makedirs(FIGURES_DIR, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
-    # Override static k if Part 2 summary is provided
     static_k = args.static_k
     if args.part2_summary and os.path.exists(args.part2_summary):
         p2 = pd.read_csv(args.part2_summary)
@@ -658,67 +765,64 @@ def main():
     print(f"  Static baseline k : {static_k}")
     print(f"  Diffusion steps   : {args.steps}")
     print(f"  Strategies        : {args.strategies}")
-    print(f"  LLM judge         : {'disabled' if args.no_judge else args.judge_model}")
+    print(f"  LLM judge         : {'DISABLED' if args.no_judge else args.judge_model}")
+    print(f"  Device            : {DEVICE}  |  {vram_info()}")
 
-    # Load data
     print(f"\nLoading data from {args.data} …")
     df = load_data(args.data, args.max_samples)
     print(f"  {len(df)} samples loaded.")
 
-    # Load judge
-    judge_tok, judge_model = None, None
-    if not args.no_judge:
-        judge_id = JUDGE_REGISTRY.get(args.judge_model, args.judge_model)
-        print(f"\nLoading judge model: {judge_id} …")
-        judge_tok = AutoTokenizer.from_pretrained(judge_id, trust_remote_code=True)
-        judge_model = AutoModelForCausalLM.from_pretrained(
-            judge_id,
-            torch_dtype=torch.bfloat16 if DEVICE == "cuda" else torch.float32,
-            device_map="auto" if DEVICE == "cuda" else None,
-            trust_remote_code=True,
-        ).eval()
-        print("  Judge loaded.")
+    # Build lookup for judge phase
+    test_data_lookup = {str(r["id"]): r for r in df.to_dict("records")}
 
     if args.models == "both":
         model_keys = ["diffucoder", "dreamcoder"]
     else:
         model_keys = [args.models]
 
-    all_raw_dfs  = []
-    all_summaries = []
+    # ── Phase 1: Diffusion inference (one (model, strategy) at a time) ────────────
+    # Critical: judge is NOT loaded yet. Each diffusion model is fully
+    # released via try/finally before the next one loads.
+    all_raw_paths: list = []
 
     for model_key in model_keys:
         for strategy in args.strategies:
             k_for_run = static_k if strategy == "static" else None
-            raw_df = run_strategy(
+            raw_path = run_strategy(
                 model_key=model_key,
                 strategy_name=strategy,
                 static_k=k_for_run,
                 df=df,
                 steps=args.steps,
                 timestamp=timestamp,
-                judge_tok=judge_tok,
-                judge_model=judge_model,
             )
-            all_raw_dfs.append(raw_df)
+            all_raw_paths.append(raw_path)
 
-            valid   = raw_df[raw_df["llm_verdict"] >= 0]
-            em_mean = raw_df["exact_match"].mean()
-            lj_mean = valid["llm_verdict"].mean() if len(valid) else float("nan")
-            mean_k  = raw_df[raw_df["dynamic_k"] >= 0]["dynamic_k"].mean()
+    # ── Phase 2: LLM judge (runs AFTER all diffusion models are released) ─────
+    if not args.no_judge:
+        judge_id = JUDGE_REGISTRY.get(args.judge_model, args.judge_model)
+        run_judge_phase_3(all_raw_paths, judge_id, test_data_lookup)
 
-            all_summaries.append({
-                "model":       MODELS_REGISTRY[model_key]["name"],
-                "strategy":    strategy,
-                "static_k":    static_k if strategy == "static" else None,
-                "mean_k":      round(mean_k, 2),
-                "steps":       args.steps,
-                "n_samples":   len(raw_df),
-                "exact_match": round(em_mean, 4),
-                "llm_judge":   round(lj_mean, 4) if not np.isnan(lj_mean) else None,
-            })
+    # ── Aggregate summary ──────────────────────────────────────────────────────────
+    all_dfs = [pd.read_csv(p) for p in all_raw_paths]
+    combined = pd.concat(all_dfs, ignore_index=True)
+    all_summaries = []
 
-    summary_df = pd.DataFrame(all_summaries)
+    for (model_name, strategy), grp in combined.groupby(["model", "strategy"]):
+        valid_lj = grp[grp["llm_verdict"] >= 0]["llm_verdict"]
+        mean_k   = grp[grp["dynamic_k"] >= 0]["dynamic_k"].mean()
+        all_summaries.append({
+            "model":       model_name,
+            "strategy":    strategy,
+            "static_k":    static_k if strategy == "static" else None,
+            "mean_k":      round(mean_k, 2),
+            "steps":       args.steps,
+            "n_samples":   len(grp),
+            "exact_match": round(grp["exact_match"].mean(), 4),
+            "llm_judge":   round(valid_lj.mean(), 4) if len(valid_lj) > 0 else None,
+        })
+
+    summary_df   = pd.DataFrame(all_summaries)
     summary_path = os.path.join(RESULTS_DIR, f"part3_summary_{timestamp}.csv")
     summary_df.to_csv(summary_path, index=False)
 
@@ -728,37 +832,28 @@ def main():
     print(summary_df.to_string(index=False))
     print(f"\n  Summary saved → {summary_path}")
 
-    # Plots
     if len(summary_df) > 0:
         plot_comparison(summary_df, timestamp)
-        plot_dynamic_k_distribution(all_raw_dfs, timestamp)
+        plot_dynamic_k_distribution(all_dfs, timestamp)
 
-    # Print improvement over static
     print("\n" + "=" * 65)
     print("  DYNAMIC vs STATIC IMPROVEMENT")
     print("=" * 65)
     for model_name in summary_df["model"].unique():
-        sub   = summary_df[summary_df["model"] == model_name]
-        static_em = sub[sub["strategy"] == "static"]["exact_match"].values
-        static_lj = sub[sub["strategy"] == "static"]["llm_judge"].values
-        if len(static_em) == 0:
+        sub       = summary_df[summary_df["model"] == model_name]
+        s_em_rows = sub[sub["strategy"] == "static"]["exact_match"].values
+        s_lj_rows = sub[sub["strategy"] == "static"]["llm_judge"].values
+        if len(s_em_rows) == 0:
             continue
-        static_em = static_em[0]
-        static_lj = static_lj[0] if len(static_lj) else float("nan")
-        print(f"\n  {model_name}  (static k={static_k}: EM={static_em:.4f}  LJ={static_lj!r})")
+        s_em = s_em_rows[0]
+        s_lj = float(s_lj_rows[0]) if len(s_lj_rows) and s_lj_rows[0] is not None else float("nan")
+        print(f"\n  {model_name}  (static k={static_k}: EM={s_em:.4f}  LJ={s_lj!r})")
         for _, row in sub[sub["strategy"] != "static"].iterrows():
-            delta_em = row["exact_match"] - static_em
-            delta_lj = (row["llm_judge"] if row["llm_judge"] is not None else float("nan")) - static_lj
-            print(f"    {row['strategy']:25s}: EM={row['exact_match']:.4f} (Δ{delta_em:+.4f})  "
-                  f"LJ={row['llm_judge']!r} (Δ{delta_lj:+.4f})")
+            d_em = row["exact_match"] - s_em
+            d_lj = (float(row["llm_judge"]) if row["llm_judge"] is not None else float("nan")) - s_lj
+            print(f"    {row['strategy']:25s}: EM={row['exact_match']:.4f} (Δ{d_em:+.4f})  "
+                  f"LJ={row['llm_judge']!r} (Δ{d_lj:+.4f})")
     print("=" * 65)
-
-    # Cleanup
-    if judge_model is not None:
-        del judge_model, judge_tok
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-        gc.collect()
 
 
 if __name__ == "__main__":
