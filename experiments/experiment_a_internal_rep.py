@@ -7,7 +7,7 @@ import pandas as pd
 from tqdm import tqdm
 from datetime import datetime
 from transformers import AutoTokenizer, AutoModel
-from sklearn.decomposition import PCA
+import umap
 from sklearn.metrics.pairwise import cosine_similarity
 import re
 
@@ -66,25 +66,52 @@ def add_gumbel_noise(logits, temperature):
     gumbel_noise = (- torch.log(noise)) ** temperature
     return logits.exp() / gumbel_noise
 
-def compute_pca_and_similarity(results_df, output_prefix):
-    """Helper snippet to compute and summarize edit signals."""
+def compute_umap_and_similarity(results_df, output_prefix):
+    """Helper snippet to compute UMAP projection and summarize edit signals."""
     if results_df.empty: return
     
     import matplotlib.pyplot as plt
     import seaborn as sns
     
-    # 1. PCA over Denoising Steps
+    # 1. UMAP over Internal Representations
     features = np.stack(results_df['hidden_state'].values)
-    pca = PCA(n_components=2)
-    features_pca = pca.fit_transform(features)
-    results_df['pca_1'] = features_pca[:, 0]
-    results_df['pca_2'] = features_pca[:, 1]
     
-    plt.figure(figsize=(10, 6))
-    sns.scatterplot(data=results_df, x='pca_1', y='pca_2', hue='condition', style='step', palette='coolwarm')
-    plt.title(f'PCA of Internal Representations ({output_prefix})')
-    plt.savefig(f"{RESULTS_DIR}/pca_{output_prefix}.png")
+    # UMAP: lower n_neighbors -> focus on local structure; metric='cosine' matches hidden state analysis
+    reducer = umap.UMAP(
+        n_components=2,
+        n_neighbors=min(15, len(features) - 1),
+        min_dist=0.1,
+        metric='cosine',
+        random_state=42
+    )
+    features_umap = reducer.fit_transform(features)
+    results_df = results_df.copy()
+    results_df['umap_1'] = features_umap[:, 0]
+    results_df['umap_2'] = features_umap[:, 1]
+    
+    # Color map: smell=red, gt=blue  
+    palette = {'smelly': '#e74c3c', 'gt': '#3498db'}
+    markers  = {'smelly': 'X', 'gt': 'o'}
+    
+    plt.figure(figsize=(11, 7))
+    for cond, grp in results_df.groupby('condition'):
+        plt.scatter(
+            grp['umap_1'], grp['umap_2'],
+            label=cond,
+            c=palette.get(cond, 'grey'),
+            marker=markers.get(cond, 'o'),
+            alpha=0.7, s=60, edgecolors='white', linewidth=0.4
+        )
+    plt.title(f'UMAP of Internal Representations — {output_prefix}\n'
+              f'(Smell Token vs. GT Token Hidden States)', fontsize=14)
+    plt.xlabel('UMAP Dimension 1')
+    plt.ylabel('UMAP Dimension 2')
+    plt.legend(title='Condition', fontsize=11)
+    plt.tight_layout()
+    plt.savefig(f"{RESULTS_DIR}/umap_{output_prefix}.png", dpi=300)
+    plt.savefig(f"{RESULTS_DIR}/umap_{output_prefix}.pdf", bbox_inches='tight')
     plt.close()
+    print(f"  -> UMAP plot saved: umap_{output_prefix}.png")
 
     # 2. Extract "Edit Signal" Distance (L2 norm) or Cosine Similarity tracking
     edit_signals = []
@@ -244,11 +271,11 @@ def main():
     
     # 1. Analyze Layer-wise edit signals
     df_layers = df_results[df_results['step'].str.contains('layer_')].copy()
-    compute_pca_and_similarity(df_layers, "layer_wise")
+    compute_umap_and_similarity(df_layers, "layer_wise")
     
     # 2. Analyze Diffusion-Step-wise edit signals
     df_diff = df_results[df_results['step'].str.contains('diff_step_')].copy()
-    compute_pca_and_similarity(df_diff, "diffusion_steps")
+    compute_umap_and_similarity(df_diff, "diffusion_steps")
     
     print("\nExperiment completed! You can check the PCA and Cosine Similarity outputs in the 'results' directory.")
 
