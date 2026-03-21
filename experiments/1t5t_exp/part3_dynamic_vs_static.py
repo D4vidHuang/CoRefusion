@@ -217,64 +217,88 @@ def strategy_threshold_heuristic(masked_code: str,
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Shared inference helpers  (copy from Part 2 to keep scripts self-contained)
+# Shared inference helpers  (mirrors benchmark_diffusion_models.py exactly)
 # ─────────────────────────────────────────────────────────────────────────────
 
-def clean_prediction(text: str) -> str:
-    text = (text.replace("<|im_end|>", "")
-                .replace("<|dlm_pad|>", "")
-                .strip())
-    first_line = text.split("\n")[0].strip("`\"' ")
-    if " " in first_line:
-        m = re.search(r"is\s+([a-zA-Z_][a-zA-Z0-9_]*)", first_line, re.I)
-        if m:
-            return m.group(1)
-        last_word = first_line.split()[-1].strip(".,;!?`\"' ")
-        if re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", last_word):
-            return last_word
-    m = re.search(r"[a-zA-Z_][a-zA-Z0-9_]*", first_line)
-    return m.group(0) if m else first_line
+def extract_all_predictions(full_code: str, masked_code: str) -> list:
+    """
+    Extract predictions for each [MASK] by anchoring on surrounding context.
+    Identical to the implementation in benchmark_diffusion_models.py.
+    """
+    parts = masked_code.split("[MASK]")
+    if len(parts) <= 1:
+        return []
+
+    predictions = []
+    current_search_start = 0
+
+    for i in range(len(parts) - 1):
+        pre  = parts[i]
+        post = parts[i + 1]
+
+        pre_anchor  = pre.strip()[-30:]  if len(pre.strip())  > 30 else pre.strip()
+        post_anchor = post.strip()[:30]  if len(post.strip()) > 30 else post.strip()
+
+        if pre_anchor:
+            idx_start = full_code.find(pre_anchor, current_search_start)
+            idx_start = (idx_start + len(pre_anchor)) if idx_start != -1 else current_search_start
+        else:
+            idx_start = current_search_start
+
+        if post_anchor:
+            idx_end = full_code.find(post_anchor, idx_start)
+        else:
+            idx_end = -1
+
+        if idx_end != -1:
+            gap_content = full_code[idx_start:idx_end].strip()
+            current_search_start = idx_end
+        else:
+            gap_content = full_code[idx_start: idx_start + 60].strip()
+            current_search_start = idx_start + 60
+
+        match = re.search(r'[a-zA-Z_$][a-zA-Z0-9_$]*', gap_content)
+        predictions.append(match.group(0) if match else gap_content[:20])
+
+    return predictions
 
 
-def run_diffusion(model, tokenizer, inputs: dict, steps: int) -> str:
-    input_ids = inputs["input_ids"].to(DEVICE)
-    attn_mask = inputs["attention_mask"].to(DEVICE)
+def run_diffusion_inference(model, tokenizer, masked_code: str,
+                            mask_token: str, k: int, steps: int) -> tuple:
+    """
+    Replace [MASK] with k concatenated mask tokens (NO spaces between tokens),
+    tokenise the whole code directly (NO chat template),
+    run diffusion_generate with max_new_tokens=1 (denoising only),
+    decode the ENTIRE output sequence, then extract predictions via
+    context anchoring.
+
+    Returns (full_code, primary_prediction).
+    """
+    # Concatenate without spaces — matches benchmark_diffusion_models.py
+    multi_mask = mask_token * k
+    input_code = masked_code.replace("[MASK]", multi_mask)
+
+    inputs    = tokenizer(input_code, return_tensors="pt")
+    input_ids = inputs.input_ids.to(model.device)
+    attn_mask = inputs.attention_mask.to(model.device)
+
     with torch.no_grad():
         output = model.diffusion_generate(
             input_ids,
             attention_mask=attn_mask,
-            max_new_tokens=20,
+            max_new_tokens=1,   # denoising in-place, no new tokens
             steps=steps,
-            output_history=False,
-            return_dict_in_generate=True,
             temperature=0.3,
             top_p=0.95,
             alg="entropy",
-            alg_temp=0.0,
+            alg_temp=0.,
         )
-    gen_ids = output.sequences[0][len(input_ids[0]):]
-    raw = tokenizer.decode(gen_ids.tolist(), skip_special_tokens=False)
-    raw = raw.split("<|dlm_pad|>")[0]
-    return clean_prediction(raw)
 
+    gen_ids   = output.sequences[0] if hasattr(output, "sequences") else output[0]
+    full_code = tokenizer.decode(gen_ids, skip_special_tokens=True)
 
-def build_input_diffucoder(masked_code, mask_token, k, tokenizer):
-    multi_mask = " ".join([mask_token] * k)
-    input_code = masked_code.replace("[MASK]", multi_mask)
-    prompt = (
-        f"<|im_start|>system\n"
-        f"You are an expert Java developer. "
-        f"Fill in the masked variable name in the code below.\n<|im_end|>\n"
-        f"<|im_start|>user\n{input_code}\n<|im_end|>\n"
-        f"<|im_start|>assistant\n"
-    )
-    return tokenizer(prompt, return_tensors="pt")
-
-
-def build_input_dreamcoder(masked_code, mask_token, k, tokenizer):
-    multi_mask = " ".join([mask_token] * k)
-    input_code = masked_code.replace("[MASK]", multi_mask)
-    return tokenizer(input_code, return_tensors="pt")
+    preds = extract_all_predictions(full_code, masked_code)
+    return full_code, (preds[0] if preds else "")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -343,24 +367,21 @@ def judge_one(jtok, jmodel, masked_code, prediction, ground_truth):
 # ─────────────────────────────────────────────────────────────────────────────
 
 def load_data(data_path, max_samples=None):
+    """Load test.csv: id | masked_code | ground_truth (no required header)."""
     csv.field_size_limit(sys.maxsize)
     rows = []
     with open(data_path, "r", encoding="utf-8") as f:
         reader = csv.reader(f)
-        for row in reader:
+        for i, row in enumerate(reader):
+            if max_samples is not None and i >= max_samples:
+                break
             if len(row) < 3:
                 continue
-            try:
-                rid = int(row[0])
-            except ValueError:
-                continue
             rows.append({
-                "id": rid,
-                "masked_code": row[1],
+                "id":           row[0],
+                "masked_code":  row[1],
                 "ground_truth": row[2].strip(),
             })
-            if max_samples and len(rows) >= max_samples:
-                break
     return pd.DataFrame(rows)
 
 
@@ -395,7 +416,8 @@ def run_strategy(model_key: str,
         trust_remote_code=True,
     ).to(DEVICE).eval()
 
-    rows = []
+    rows   = []
+    errors = 0
     for _, row in tqdm(df.iterrows(), total=len(df),
                        desc=f"{model_name[:12]} {strategy_name}"):
         sample_id    = row["id"]
@@ -403,7 +425,7 @@ def run_strategy(model_key: str,
         ground_truth = str(row["ground_truth"]).strip()
 
         try:
-            # Determine k
+            # Determine k for this sample
             if static_k is not None:
                 k = static_k
             elif strategy_name == "dynamic_threshold":
@@ -411,21 +433,23 @@ def run_strategy(model_key: str,
             else:  # dynamic_context
                 k = strategy_context_naming_length(masked_code, tokenizer)
 
-            # Build input
-            if model_key == "diffucoder":
-                inputs = build_input_diffucoder(masked_code, mask_token, k, tokenizer)
-            else:
-                inputs = build_input_dreamcoder(masked_code, mask_token, k, tokenizer)
-
-            prediction  = run_diffusion(model, tokenizer, inputs, steps)
+            # Run diffusion inference (same approach as benchmark_diffusion_models.py)
+            _full_code, prediction = run_diffusion_inference(
+                model, tokenizer, masked_code, mask_token, k, steps
+            )
             exact_match = int(prediction == ground_truth)
 
-            # LLM judge
+            # LLM judge (skip if exact match to save compute)
             if judge_tok is not None and not exact_match:
-                verdict = judge_one(judge_tok, judge_model,
-                                    masked_code, prediction, ground_truth)
+                if prediction and re.search(r"[a-zA-Z]", prediction):
+                    verdict = judge_one(judge_tok, judge_model,
+                                        masked_code, prediction, ground_truth)
+                else:
+                    verdict = 0
+            elif exact_match:
+                verdict = 1    # exact match → automatically acceptable
             else:
-                verdict = exact_match
+                verdict = -2   # judge disabled
 
             rows.append({
                 "id":           sample_id,
@@ -440,6 +464,7 @@ def run_strategy(model_key: str,
             })
 
         except Exception as e:
+            errors += 1
             rows.append({
                 "id":           sample_id,
                 "model":        model_name,
@@ -452,6 +477,10 @@ def run_strategy(model_key: str,
                 "llm_verdict":  -1,
                 "error":        str(e),
             })
+            if errors <= 5:
+                print(f"    Error on sample {sample_id}: {e}")
+            elif errors == 6:
+                print("    ... suppressing further error messages")
 
     raw_df = pd.DataFrame(rows)
     safe_name = model_name.replace("-", "_")
@@ -461,9 +490,12 @@ def run_strategy(model_key: str,
 
     valid   = raw_df[raw_df["llm_verdict"] >= 0]
     em_mean = raw_df["exact_match"].mean()
-    lj_mean = valid["llm_verdict"].mean() if len(valid) else float("nan")
-    print(f"\n  EM={em_mean:.3f}  LJ={lj_mean:.3f}  "
-          f"mean_k={raw_df['dynamic_k'].replace(-1, pd.NA).mean():.2f}")
+    lj_mean = valid["llm_verdict"].mean() if len(valid) > 0 else float("nan")
+    mean_k  = raw_df[raw_df["dynamic_k"] >= 0]["dynamic_k"].mean()
+    print(f"\n  EM={em_mean:.4f}  errors={errors}")
+    if not np.isnan(lj_mean):
+        print(f"  LJ={lj_mean:.4f}")
+    print(f"  mean_k={mean_k:.2f}")
     print(f"  → Saved: {out_path}")
 
     # Cleanup diffusion model (judge stays loaded)
