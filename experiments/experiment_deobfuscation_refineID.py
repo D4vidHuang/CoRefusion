@@ -64,7 +64,7 @@ RESULTS_DIR = "results/deobfuscation_refineID"
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 NUM_MASK_TOKENS = 2          # Match RQ1 benchmark
-MAX_INPUT_TOKENS = 7168      # Skip samples exceeding this token count
+MAX_INPUT_TOKENS = 16384     # DiffuCoder supports 131072; generous limit
 DIFFUSION_STEPS = 64         # Match RQ1 benchmark
 SENTINEL = "[DEOBF_MASK]"   # Sentinel for template-based extraction
 
@@ -106,21 +106,53 @@ COMMON_TYPES = {
 # ---- Identifier Extraction --------------------------------------------------
 
 def extract_java_identifiers_regex(code: str) -> List[Dict]:
-    """Extract Java variable/parameter identifiers via regex."""
+    """
+    Extract Java LOCAL variable/parameter identifiers via regex.
+    Skips: import/package lines, qualified-name segments (after '.'),
+    method calls (followed by '('), annotations (after '@'),
+    single-char identifiers that are ambiguous.
+    """
     results = []
     identifier_pattern = re.compile(r'\b([a-z_][a-zA-Z0-9_]*)\b')
 
     for line_num, line in enumerate(code.split('\n'), 1):
         stripped = line.strip()
+        # Skip comments
         if stripped.startswith('//') or stripped.startswith('*') or stripped.startswith('/*'):
             continue
+        # Skip import and package declarations — these are not local variables
+        if stripped.startswith('import ') or stripped.startswith('package '):
+            continue
+        # Skip annotation lines
+        if stripped.startswith('@'):
+            continue
+
         for match in identifier_pattern.finditer(line):
             name = match.group(1)
+            col = match.start()
+
             if name in JAVA_KEYWORDS or name in COMMON_TYPES:
                 continue
+            # Skip method calls / declarations: identifier followed by '('
             if match.end() < len(line) and line[match.end()] == '(':
                 continue
-            results.append({'name': name, 'line': line_num, 'col': match.start()})
+            # Skip qualified-name segments: identifier preceded by '.'
+            # e.g. in "org.apache.dubbo", skip "apache" and "dubbo"
+            if col > 0 and line[col - 1] == '.':
+                continue
+            # Skip identifiers followed by '.' — likely package/class prefix
+            # e.g. in "System.out", skip "out" (already caught above)
+            # But also skip "org" in "org.apache" (it's followed by '.')
+            if match.end() < len(line) and line[match.end()] == '.':
+                continue
+            # Skip single-char names that are likely loop vars in original code
+            # (we only want to obfuscate meaningful multi-char variables)
+            # Exception: common single-char params like 'e', 'i', 'j', 'k' ARE variables
+            # but they're too ambiguous for deobfuscation testing, skip them
+            if len(name) == 1:
+                continue
+
+            results.append({'name': name, 'line': line_num, 'col': col})
 
     seen = set()
     unique = []
