@@ -1,32 +1,50 @@
 """
-Deobfuscation Experiment using RefineID Dataset
+RQ2 — Deobfuscation Experiment on RefineID Dataset
 
-This experiment:
-1. Loads RefineID dataset (Java code with [MASK] and target)
-2. Reconstructs original code by replacing [MASK] with target
-3. Extracts all variable positions using Java AST (via javalang)
-4. Obfuscates the code by replacing all variables with meaningless names (a, b, c, ...)
-5. Uses diffusion models (DiffuCoder, DreamCoder) to deobfuscate
-6. Evaluates the quality of recovered variable names
+Tests whether diffusion LLMs can recover meaningful variable names when ALL
+identifiers are obfuscated (a, b, c, ...) and replaced with <|mask|> tokens.
 
-Diffusion Steps: 32
-Models: DiffuCoder-7B-Instruct, Dream-Coder-v0-Instruct-7B
+Pipeline per sample:
+  1. Reconstruct original code from masked_code + target
+  2. Extract all identifier positions via regex
+  3. Obfuscate: replace each unique identifier with a, b, c, ...
+  4. Replace each obfuscated name with <|mask|> * NUM_MASK_TOKENS
+  5. Run model.diffusion_generate() (same params as RQ1 benchmark)
+  6. Extract predictions via anchor-based matching
+  7. Compare predictions with original names (majority vote per identifier)
+
+Models: DiffuCoder-7B-Base, DreamCoder-7B
+Data:   data/test.csv (same 1000 samples as RQ1 benchmark)
+
+Usage:
+    python experiments/experiment_deobfuscation_refineID.py
+    python experiments/experiment_deobfuscation_refineID.py --model diffucoder --max-samples 50
+    python experiments/experiment_deobfuscation_refineID.py --list-models
 """
 
 import os
 import sys
-import torch
-import pandas as pd
-from tqdm import tqdm
-from transformers import AutoTokenizer, AutoModel
-from datetime import datetime
+import csv
 import re
+import gc
 import json
-from typing import List, Dict, Tuple, Optional
-from collections import defaultdict
 import argparse
+import time
+from datetime import datetime
+from typing import List, Dict, Tuple, Optional
+from collections import Counter
 
-# --- Mock torchvision for compatibility ---
+import torch
+from transformers import AutoTokenizer, AutoModel
+from tqdm import tqdm
+
+try:
+    from huggingface_hub import HfApi
+    HAS_HF_HUB = True
+except ImportError:
+    HAS_HF_HUB = False
+
+# --- Mock torchvision for DiffuCoder/DreamCoder compatibility ---
 class MockModule:
     def __getattr__(self, name): return MockModule()
     def __call__(self, *args, **kwargs): return MockModule()
@@ -34,578 +52,560 @@ class MockModule:
 sys.modules['torchvision'] = MockModule()
 sys.modules['torchvision.ops'] = MockModule()
 sys.modules['torchvision.transforms'] = MockModule()
-
 if not hasattr(torch.ops, 'torchvision'):
     class DummyOps:
         def nms(*args, **kwargs): return torch.tensor([])
     torch.ops.torchvision = DummyOps()
-# ------------------------------------------
 
-# Try to import javalang for Java AST parsing
-try:
-    import javalang
-    HAS_JAVALANG = True
-except ImportError:
-    HAS_JAVALANG = False
-    print("Warning: javalang not installed. Using regex-based identifier extraction.")
-    print("Install with: pip install javalang")
+# ---- Configuration ----------------------------------------------------------
 
+DATA_PATH = "data/test.csv"
+RESULTS_DIR = "results/deobfuscation_refineID"
+DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+
+NUM_MASK_TOKENS = 2          # Match RQ1 benchmark
+MAX_INPUT_TOKENS = 7168      # Skip samples exceeding this token count
+DIFFUSION_STEPS = 64         # Match RQ1 benchmark
+SENTINEL = "[DEOBF_MASK]"   # Sentinel for template-based extraction
+
+# ---- Model Registry ---------------------------------------------------------
+
+MODEL_REGISTRY = {
+    "DiffuCoder-7B": {
+        "id": "apple/DiffuCoder-7B-Base",
+        "mask_token": "<|mask|>",
+    },
+    "DreamCoder-7B": {
+        "id": "Dream-org/Dream-Coder-v0-Instruct-7B",
+        "mask_token": "<|mask|>",
+    },
+}
+
+# ---- Java Keywords & Types (for identifier filtering) -----------------------
+
+JAVA_KEYWORDS = {
+    'abstract', 'assert', 'boolean', 'break', 'byte', 'case', 'catch', 'char',
+    'class', 'const', 'continue', 'default', 'do', 'double', 'else', 'enum',
+    'extends', 'final', 'finally', 'float', 'for', 'goto', 'if', 'implements',
+    'import', 'instanceof', 'int', 'interface', 'long', 'native', 'new',
+    'package', 'private', 'protected', 'public', 'return', 'short', 'static',
+    'strictfp', 'super', 'switch', 'synchronized', 'this', 'throw', 'throws',
+    'transient', 'try', 'void', 'volatile', 'while', 'true', 'false', 'null',
+    'var', 'record', 'sealed', 'permits', 'yield',
+}
+
+COMMON_TYPES = {
+    'String', 'Integer', 'Long', 'Double', 'Float', 'Boolean', 'Character',
+    'Object', 'Class', 'System', 'Math', 'List', 'ArrayList', 'Map', 'HashMap',
+    'Set', 'HashSet', 'Collection', 'Iterator', 'Exception', 'RuntimeException',
+    'Thread', 'Runnable', 'Comparable', 'Serializable', 'Override', 'Deprecated',
+    'SuppressWarnings', 'FunctionalInterface', 'Test', 'Before', 'After',
+}
+
+
+# ---- Identifier Extraction --------------------------------------------------
 
 def extract_java_identifiers_regex(code: str) -> List[Dict]:
-    """
-    Extract Java identifiers using regex (fallback when javalang is not available).
-    This is less accurate but works for most cases.
-    """
-    # Java keywords to exclude
-    JAVA_KEYWORDS = {
-        'abstract', 'assert', 'boolean', 'break', 'byte', 'case', 'catch', 'char',
-        'class', 'const', 'continue', 'default', 'do', 'double', 'else', 'enum',
-        'extends', 'final', 'finally', 'float', 'for', 'goto', 'if', 'implements',
-        'import', 'instanceof', 'int', 'interface', 'long', 'native', 'new',
-        'package', 'private', 'protected', 'public', 'return', 'short', 'static',
-        'strictfp', 'super', 'switch', 'synchronized', 'this', 'throw', 'throws',
-        'transient', 'try', 'void', 'volatile', 'while', 'true', 'false', 'null',
-        'var', 'record', 'sealed', 'permits', 'yield'
-    }
-
-    # Common Java types to exclude
-    COMMON_TYPES = {
-        'String', 'Integer', 'Long', 'Double', 'Float', 'Boolean', 'Character',
-        'Object', 'Class', 'System', 'Math', 'List', 'ArrayList', 'Map', 'HashMap',
-        'Set', 'HashSet', 'Collection', 'Iterator', 'Exception', 'RuntimeException',
-        'Thread', 'Runnable', 'Comparable', 'Serializable', 'Override', 'Deprecated',
-        'SuppressWarnings', 'FunctionalInterface', 'Test', 'Before', 'After'
-    }
-
+    """Extract Java variable/parameter identifiers via regex."""
     results = []
-    lines = code.split('\n')
-
-    # Pattern for Java identifiers
     identifier_pattern = re.compile(r'\b([a-z_][a-zA-Z0-9_]*)\b')
 
-    for line_num, line in enumerate(lines, 1):
-        # Skip comments
+    for line_num, line in enumerate(code.split('\n'), 1):
         stripped = line.strip()
         if stripped.startswith('//') or stripped.startswith('*') or stripped.startswith('/*'):
             continue
-
         for match in identifier_pattern.finditer(line):
             name = match.group(1)
-            col = match.start()
-
-            # Skip keywords and common types
             if name in JAVA_KEYWORDS or name in COMMON_TYPES:
                 continue
-
-            # Skip if it looks like a method call (followed by '(')
-            after_match = line[match.end():match.end()+1] if match.end() < len(line) else ''
-            if after_match == '(':
+            if match.end() < len(line) and line[match.end()] == '(':
                 continue
+            results.append({'name': name, 'line': line_num, 'col': match.start()})
 
-            results.append({
-                'name': name,
-                'line': line_num,
-                'col': col,
-                'type': 'identifier'
-            })
-
-    # Remove duplicates based on position
     seen = set()
-    unique_results = []
+    unique = []
     for item in results:
         key = (item['line'], item['col'])
         if key not in seen:
             seen.add(key)
-            unique_results.append(item)
-
-    return sorted(unique_results, key=lambda x: (x['line'], x['col']))
-
-
-def extract_java_identifiers_ast(code: str) -> List[Dict]:
-    """
-    Extract Java identifiers using javalang AST parser.
-    More accurate than regex but requires valid Java code.
-    """
-    if not HAS_JAVALANG:
-        return extract_java_identifiers_regex(code)
-
-    results = []
-
-    try:
-        # Try to parse as a compilation unit
-        tree = javalang.parse.parse(code)
-
-        # Walk the AST and collect identifiers
-        for path, node in tree:
-            if isinstance(node, javalang.tree.LocalVariableDeclaration):
-                for declarator in node.declarators:
-                    if hasattr(declarator, 'name') and declarator.name:
-                        results.append({
-                            'name': declarator.name,
-                            'type': 'local_variable',
-                            'node_type': type(node).__name__
-                        })
-            elif isinstance(node, javalang.tree.VariableDeclarator):
-                if hasattr(node, 'name') and node.name:
-                    results.append({
-                        'name': node.name,
-                        'type': 'variable',
-                        'node_type': type(node).__name__
-                    })
-            elif isinstance(node, javalang.tree.FormalParameter):
-                if hasattr(node, 'name') and node.name:
-                    results.append({
-                        'name': node.name,
-                        'type': 'parameter',
-                        'node_type': type(node).__name__
-                    })
-            elif isinstance(node, javalang.tree.MemberReference):
-                if hasattr(node, 'member') and node.member:
-                    # This could be a variable reference
-                    results.append({
-                        'name': node.member,
-                        'type': 'member_reference',
-                        'node_type': type(node).__name__
-                    })
-
-    except Exception as e:
-        # Fall back to regex if AST parsing fails
-        print(f"AST parsing failed, using regex: {e}")
-        return extract_java_identifiers_regex(code)
-
-    # If AST didn't find much, supplement with regex
-    if len(results) < 3:
-        return extract_java_identifiers_regex(code)
-
-    return results
+            unique.append(item)
+    return sorted(unique, key=lambda x: (x['line'], x['col']))
 
 
-def extract_java_identifiers_with_positions(code: str) -> List[Dict]:
-    """
-    Extract Java identifiers with their exact positions in the code.
-    Uses regex for position tracking since javalang doesn't provide positions.
-    """
-    # Get unique identifier names from AST or regex
+def extract_identifiers_with_positions(code: str) -> List[Dict]:
+    """Find all occurrences of each unique identifier with (line, col) positions."""
     identifiers = extract_java_identifiers_regex(code)
+    unique_names = set(item['name'] for item in identifiers)
 
-    # Get unique names
-    unique_names = set()
-    for item in identifiers:
-        unique_names.add(item['name'])
-
-    # Now find all occurrences with positions
     results = []
-    lines = code.split('\n')
-
-    for line_num, line in enumerate(lines, 1):
+    for line_num, line in enumerate(code.split('\n'), 1):
         for name in unique_names:
-            # Find all occurrences of this identifier in the line
-            pattern = re.compile(r'\b' + re.escape(name) + r'\b')
-            for match in pattern.finditer(line):
-                col = match.start()
-                results.append({
-                    'name': name,
-                    'line': line_num,
-                    'col': col,
-                    'type': 'identifier'
-                })
-
+            for match in re.finditer(r'\b' + re.escape(name) + r'\b', line):
+                results.append({'name': name, 'line': line_num, 'col': match.start()})
     return sorted(results, key=lambda x: (x['line'], x['col']))
 
 
-def obfuscate_java_code(code: str) -> Tuple[str, Dict[str, str], List[Dict]]:
-    """
-    Obfuscate Java code by replacing all identifiers with meaningless names.
+# ---- Obfuscation ------------------------------------------------------------
 
-    Returns:
-        obfuscated_code: Code with obfuscated variable names
-        mapping: Dictionary mapping original names to obfuscated names
-        identifiers: List of identifier positions
+def obfuscate_java_code(code: str) -> Tuple[str, Dict[str, str]]:
     """
-    identifiers = extract_java_identifiers_with_positions(code)
-
+    Replace all identifiers with single/double-letter names (a, b, c, ..., aa, ab, ...).
+    Returns (obfuscated_code, mapping: {original_name -> obfuscated_name}).
+    """
+    identifiers = extract_identifiers_with_positions(code)
     if not identifiers:
-        return code, {}, []
+        return code, {}
 
-    # Get unique names in order of first appearance
+    # Unique names in first-appearance order
     unique_names = []
     seen = set()
     for item in identifiers:
-        name = item['name']
-        if name not in seen:
-            unique_names.append(name)
-            seen.add(name)
+        if item['name'] not in seen:
+            unique_names.append(item['name'])
+            seen.add(item['name'])
 
-    # Create obfuscation mapping
+    # Build mapping
     obfuscation_map = {}
     for idx, name in enumerate(unique_names):
         if idx < 26:
-            obfuscated = chr(ord('a') + idx)
+            obfuscation_map[name] = chr(ord('a') + idx)
         else:
-            first = (idx - 26) // 26
-            second = (idx - 26) % 26
-            obfuscated = chr(ord('a') + first) + chr(ord('a') + second)
-        obfuscation_map[name] = obfuscated
+            obfuscation_map[name] = chr(ord('a') + (idx - 26) // 26) + chr(ord('a') + (idx - 26) % 26)
 
-    # Sort identifiers by position (reverse order to avoid offset issues)
-    sorted_identifiers = sorted(identifiers, key=lambda x: (x['line'], x['col']), reverse=True)
-
-    # Replace identifiers in code
+    # Replace in reverse position order to preserve offsets
     lines = code.split('\n')
-    for item in sorted_identifiers:
-        line_idx = item['line'] - 1
-        col_idx = item['col']
-        original_name = item['name']
-        obfuscated_name = obfuscation_map[original_name]
+    for item in sorted(identifiers, key=lambda x: (x['line'], x['col']), reverse=True):
+        li = item['line'] - 1
+        ci = item['col']
+        orig = item['name']
+        if li < len(lines):
+            line = lines[li]
+            lines[li] = line[:ci] + obfuscation_map[orig] + line[ci + len(orig):]
 
-        if line_idx < len(lines):
-            line = lines[line_idx]
-            before = line[:col_idx]
-            after = line[col_idx + len(original_name):]
-            lines[line_idx] = before + obfuscated_name + after
-
-    obfuscated_code = '\n'.join(lines)
-
-    # Update identifier positions for obfuscated code
-    obfuscated_identifiers = extract_java_identifiers_with_positions(obfuscated_code)
-
-    return obfuscated_code, obfuscation_map, obfuscated_identifiers
+    return '\n'.join(lines), obfuscation_map
 
 
-def get_token_mask_from_identifiers(code: str, tokenizer, input_ids: torch.Tensor,
-                                    identifiers: List[Dict]) -> torch.Tensor:
+# ---- Mask Insertion & Template Building -------------------------------------
+
+def prepare_masked_input(
+    obfuscated_code: str,
+    obfuscation_map: Dict[str, str],
+    mask_token: str,
+    num_mask_tokens: int,
+) -> Tuple[str, str, List[Dict]]:
     """
-    Create a token-level mask for identifier positions.
+    Replace every obfuscated identifier occurrence with <|mask|> tokens.
+
+    Returns:
+        masked_code:  string with <|mask|> tokens (fed to model)
+        template:     parallel string with [DEOBF_MASK] sentinels (for extraction)
+        positions:    list of {obfuscated, original} per replacement site
     """
-    if not identifiers:
-        return torch.zeros(len(input_ids), dtype=torch.bool)
-
-    # Get unique identifier names
-    ident_names = set(item['name'] for item in identifiers)
-
-    # Calculate byte offsets for each identifier
-    lines = code.split('\n')
-    ident_ranges = []
-    for item in identifiers:
-        line_idx = item['line'] - 1
-        col_idx = item['col']
-        if line_idx < len(lines):
-            start_offset = sum(len(l) + 1 for l in lines[:line_idx]) + col_idx
-            end_offset = start_offset + len(item['name'])
-            ident_ranges.append((start_offset, end_offset, item['name']))
-
-    # Tokenize and create mask
-    tokens_decoded = [tokenizer.decode([tid]) for tid in input_ids]
-    is_ident_token = torch.zeros(len(input_ids), dtype=torch.bool)
-
-    current_char_pos = 0
-
-    for i, tok_text in enumerate(tokens_decoded):
-        if not tok_text or tok_text in ["<s>", "</s>", "<unk>", "<pad>", "<|im_start|>", "<|im_end|>"]:
-            continue
-
-        # Handle special tokenizer characters
-        clean_tok = tok_text.replace('▁', ' ').replace('Ġ', ' ')
-        search_text = clean_tok.strip()
-
-        if not search_text:
-            continue
-
-        start_find = code.find(search_text, current_char_pos)
-        if start_find != -1:
-            tok_start = start_find
-            tok_end = start_find + len(search_text)
-            current_char_pos = tok_end
-
-            # Check overlap with any identifier range
-            for i_start, i_end, i_name in ident_ranges:
-                if max(tok_start, i_start) < min(tok_end, i_end):
-                    # Only mask if token is pure identifier (no syntax symbols)
-                    pure_content = clean_tok.lstrip(' ')
-                    if not re.search(r"[^a-zA-Z0-9_]", pure_content):
-                        is_ident_token[i] = True
-                    break
-
-    return is_ident_token
-
-
-def run_constrained_diffusion(model, tokenizer, obfuscated_code: str,
-                              identifiers: List[Dict], total_steps: int = 32,
-                              device: str = "cuda") -> Tuple[str, List[str]]:
-    """
-    Run constrained diffusion to deobfuscate code.
-    Only updates tokens at identifier positions.
-    """
-    # Tokenize
-    input_ids_full = tokenizer.encode(obfuscated_code, return_tensors="pt").to(device)
-    input_ids = input_ids_full[0]
-
-    # Get mask
-    ident_mask = get_token_mask_from_identifiers(obfuscated_code, tokenizer, input_ids, identifiers).to(device)
-
-    # Initial state
-    x = input_ids_full.clone()
-    history = []
-
-    # Diffusion loop
-    for step in range(total_steps):
-        with torch.no_grad():
-            logits = model(x).logits
-            x_pred = torch.argmax(logits, dim=-1)
-
-            # Apply updates ONLY to identifier positions
-            x_next = torch.where(ident_mask, x_pred, x)
-
-            # Record history
-            decoded = tokenizer.decode(x_next[0], skip_special_tokens=True)
-            history.append(decoded)
-
-            # Check convergence
-            if torch.equal(x, x_next):
-                break
-
-            x = x_next
-
-    final_code = tokenizer.decode(x[0], skip_special_tokens=True)
-    return final_code, history
-
-
-def calculate_metrics(original_code: str, obfuscated_code: str,
-                     deobfuscated_code: str, obfuscation_map: Dict[str, str]) -> Dict:
-    """
-    Calculate evaluation metrics.
-    """
-    # Extract identifiers from original and deobfuscated code
-    original_identifiers = extract_java_identifiers_with_positions(original_code)
-    deobfuscated_identifiers = extract_java_identifiers_with_positions(deobfuscated_code)
-
-    # Create reverse mapping (obfuscated -> original)
     reverse_map = {v: k for k, v in obfuscation_map.items()}
+    obf_names = sorted(reverse_map.keys(), key=len, reverse=True)
 
-    # Get unique names
-    original_names = set(item['name'] for item in original_identifiers)
-    deobfuscated_names = set(item['name'] for item in deobfuscated_identifiers)
+    if not obf_names:
+        return obfuscated_code, obfuscated_code, []
 
-    # Calculate metrics
-    total_original = len(original_names)
-    exact_matches = len(original_names & deobfuscated_names)
+    pattern = re.compile(r'\b(' + '|'.join(re.escape(n) for n in obf_names) + r')\b')
 
-    # Check if deobfuscated names are meaningful (not single letters)
-    meaningful_names = sum(1 for name in deobfuscated_names if len(name) > 1)
+    positions = []
+    mask_replacement = mask_token * num_mask_tokens
+
+    def replacer_masked(m):
+        positions.append({'obfuscated': m.group(0), 'original': reverse_map[m.group(0)]})
+        return mask_replacement
+
+    # Reset positions for template pass
+    masked_code = pattern.sub(replacer_masked, obfuscated_code)
+
+    # Build template with sentinels (separate pass to get correct string)
+    template = pattern.sub(SENTINEL, obfuscated_code)
+
+    return masked_code, template, positions
+
+
+# ---- Prediction Extraction --------------------------------------------------
+
+def extract_deobfuscation_predictions(full_output: str, template: str) -> List[str]:
+    """
+    Extract predicted identifiers from model output using anchor-based matching.
+    Mirrors benchmark's extract_all_predictions() but uses DEOBF_MASK sentinel.
+    """
+    parts = template.split(SENTINEL)
+    if len(parts) <= 1:
+        return []
+
+    predictions = []
+    search_start = 0
+
+    for i in range(len(parts) - 1):
+        pre = parts[i]
+        post = parts[i + 1]
+
+        pre_anchor = pre.strip()[-30:] if len(pre.strip()) > 30 else pre.strip()
+        post_anchor = post.strip()[:30] if len(post.strip()) > 30 else post.strip()
+
+        # Locate pre_anchor
+        if pre_anchor:
+            idx_start = full_output.find(pre_anchor, search_start)
+            if idx_start != -1:
+                idx_start += len(pre_anchor)
+            else:
+                idx_start = search_start
+        else:
+            idx_start = search_start
+
+        # Locate post_anchor
+        if post_anchor:
+            idx_end = full_output.find(post_anchor, idx_start)
+        else:
+            idx_end = -1
+
+        # Extract gap
+        if idx_end != -1:
+            gap = full_output[idx_start:idx_end].strip()
+            search_start = idx_end
+        else:
+            gap = full_output[idx_start:idx_start + 60].strip()
+            search_start = idx_start + 60
+
+        # Extract first valid Java identifier from gap
+        m = re.search(r'[a-zA-Z_$][a-zA-Z0-9_$]*', gap)
+        predictions.append(m.group(0) if m else "")
+
+    return predictions
+
+
+# ---- Evaluation -------------------------------------------------------------
+
+def evaluate_predictions(
+    predictions: List[str],
+    position_records: List[Dict],
+) -> Dict:
+    """
+    Evaluate deobfuscation quality using majority-vote per unique identifier.
+    """
+    if not predictions or not position_records:
+        return {
+            'identifiers_correct': 0, 'identifiers_total': 0,
+            'per_sample_em_rate': 0.0, 'meaningful_rate': 0.0,
+            'predicted_obfuscated_rate': 0.0,
+            'originals': {}, 'majority_predictions': {},
+        }
+
+    n = min(len(predictions), len(position_records))
+
+    # Group predictions by original identifier name
+    groups = {}  # original_name -> list of predictions
+    for i in range(n):
+        orig = position_records[i]['original']
+        obf = position_records[i]['obfuscated']
+        pred = predictions[i]
+        if orig not in groups:
+            groups[orig] = {'predictions': [], 'obfuscated': obf}
+        groups[orig]['predictions'].append(pred)
+
+    identifiers_correct = 0
+    identifiers_total = len(groups)
+    meaningful_count = 0
+    predicted_obfuscated = 0
+    majority_predictions = {}
+
+    for orig_name, info in groups.items():
+        preds = info['predictions']
+        obf_name = info['obfuscated']
+
+        # Majority vote (most common non-empty prediction)
+        counter = Counter(p for p in preds if p)
+        if counter:
+            majority_pred = counter.most_common(1)[0][0]
+        else:
+            majority_pred = ""
+
+        majority_predictions[orig_name] = majority_pred
+
+        if majority_pred == orig_name:
+            identifiers_correct += 1
+        if len(majority_pred) > 1:
+            meaningful_count += 1
+        if majority_pred == obf_name:
+            predicted_obfuscated += 1
+
+    em_rate = identifiers_correct / identifiers_total if identifiers_total else 0.0
+    meaningful_rate = meaningful_count / identifiers_total if identifiers_total else 0.0
+    obf_rate = predicted_obfuscated / identifiers_total if identifiers_total else 0.0
 
     return {
-        'total_original_identifiers': total_original,
-        'total_deobfuscated_identifiers': len(deobfuscated_names),
-        'exact_matches': exact_matches,
-        'exact_match_rate': exact_matches / total_original if total_original > 0 else 0,
-        'meaningful_names': meaningful_names,
-        'meaningful_rate': meaningful_names / len(deobfuscated_names) if deobfuscated_names else 0,
-        'original_names': list(original_names),
-        'deobfuscated_names': list(deobfuscated_names)
+        'identifiers_correct': identifiers_correct,
+        'identifiers_total': identifiers_total,
+        'per_sample_em_rate': em_rate,
+        'meaningful_rate': meaningful_rate,
+        'predicted_obfuscated_rate': obf_rate,
+        'originals': {orig: info['obfuscated'] for orig, info in groups.items()},
+        'majority_predictions': majority_predictions,
     }
 
 
-def run_deobfuscation_experiment(model_name: str, model_id: str,
-                                 data_path: str, total_steps: int = 32,
-                                 device: str = "cuda", max_samples: int = None):
-    """
-    Run deobfuscation experiment on RefineID dataset.
-    """
-    print(f"\n{'='*80}")
-    print(f"Deobfuscation Experiment: {model_name}")
-    print(f"Model ID: {model_id}")
-    print(f"Diffusion Steps: {total_steps}")
-    print(f"{'='*80}")
+# ---- Data Loading -----------------------------------------------------------
 
-    # Create output directory
-    os.makedirs("results/deobfuscation_refineID", exist_ok=True)
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    output_dir = f"results/deobfuscation_refineID/{model_name}_{timestamp}"
-    os.makedirs(output_dir, exist_ok=True)
-
-    # Load data
-    print(f"\nLoading data from {data_path}...")
-    df = pd.read_csv(data_path, header=None, names=['id', 'masked_code', 'target'])
-
-    if max_samples:
-        df = df.head(max_samples)
-
-    print(f"Total samples: {len(df)}")
-
-    # Load model
-    print(f"\nLoading model: {model_id}")
-    tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
-    model = AutoModel.from_pretrained(
-        model_id,
-        torch_dtype=torch.bfloat16 if device == "cuda" else torch.float32,
-        trust_remote_code=True
-    ).to(device).eval()
-
-    # Run experiment
-    results = []
-
-    for idx, row in tqdm(df.iterrows(), total=len(df), desc=f"Testing {model_name}"):
-        item_id = row['id']
-        masked_code = str(row['masked_code'])
-        target = str(row['target']).strip()
-
-        try:
-            # Step 1: Reconstruct original code
-            original_code = masked_code.replace('[MASK]', target)
-
-            # Step 2: Obfuscate the code
-            obfuscated_code, obfuscation_map, identifiers = obfuscate_java_code(original_code)
-
-            if not identifiers:
-                print(f"Warning: No identifiers found in sample {item_id}, skipping...")
+def load_data(data_path, max_samples=None):
+    csv.field_size_limit(sys.maxsize)
+    rows = []
+    with open(data_path, "r", encoding="utf-8") as f:
+        reader = csv.reader(f)
+        for i, row in enumerate(reader):
+            if max_samples is not None and i >= max_samples:
+                break
+            if len(row) < 3:
                 continue
+            rows.append({"id": row[0], "masked_code": row[1], "target": row[2].strip()})
+    return rows
 
-            # Step 3: Run constrained diffusion
-            deobfuscated_code, history = run_constrained_diffusion(
-                model, tokenizer, obfuscated_code, identifiers,
-                total_steps=total_steps, device=device
-            )
 
-            # Step 4: Calculate metrics
-            metrics = calculate_metrics(original_code, obfuscated_code,
-                                        deobfuscated_code, obfuscation_map)
+# ---- HF Upload --------------------------------------------------------------
 
-            results.append({
-                'id': item_id,
-                'target': target,
-                'num_identifiers': len(set(item['name'] for item in identifiers)),
-                'exact_match_rate': metrics['exact_match_rate'],
-                'meaningful_rate': metrics['meaningful_rate'],
-                'obfuscation_map': json.dumps(obfuscation_map),
-                'original_names': json.dumps(metrics['original_names']),
-                'deobfuscated_names': json.dumps(metrics['deobfuscated_names']),
-                'converged_steps': len(history)
-            })
+def upload_to_hf(file_path, repo_id, token, path_in_repo=None):
+    if not HAS_HF_HUB or not repo_id:
+        return False
+    try:
+        api = HfApi(token=token)
+        api.create_repo(repo_id=repo_id, repo_type="dataset", exist_ok=True)
+        filename = os.path.basename(file_path)
+        if path_in_repo is None:
+            path_in_repo = f"deobfuscation_benchmark/{filename}"
+        print(f"    Uploading {filename} to {repo_id}...")
+        api.upload_file(
+            path_or_fileobj=file_path, path_in_repo=path_in_repo,
+            repo_id=repo_id, token=token, repo_type="dataset",
+        )
+        return True
+    except Exception as e:
+        print(f"    Upload failed: {e}")
+        return False
 
-        except Exception as e:
-            print(f"Error on sample {item_id}: {e}")
-            results.append({
-                'id': item_id,
-                'error': str(e)
-            })
 
-    # Save results
-    results_df = pd.DataFrame(results)
-    results_file = os.path.join(output_dir, "results.csv")
-    results_df.to_csv(results_file, index=False)
+# ---- Main Experiment --------------------------------------------------------
 
-    # Calculate summary statistics
-    successful_results = [r for r in results if 'error' not in r]
-    if successful_results:
-        avg_exact_match = sum(r['exact_match_rate'] for r in successful_results) / len(successful_results)
-        avg_meaningful = sum(r['meaningful_rate'] for r in successful_results) / len(successful_results)
-        avg_steps = sum(r['converged_steps'] for r in successful_results) / len(successful_results)
+def run_experiment(target_models=None, max_samples=None, hf_repo=None, hf_token=None):
+    os.makedirs(RESULTS_DIR, exist_ok=True)
+
+    if target_models:
+        models_to_run = {k: MODEL_REGISTRY[k] for k in target_models if k in MODEL_REGISTRY}
+        if not models_to_run:
+            print(f"ERROR: No valid models. Available: {list(MODEL_REGISTRY.keys())}")
+            return
     else:
-        avg_exact_match = 0
-        avg_meaningful = 0
-        avg_steps = 0
+        models_to_run = MODEL_REGISTRY
 
-    summary = {
-        'model_name': model_name,
-        'model_id': model_id,
-        'total_samples': len(df),
-        'successful_samples': len(successful_results),
-        'failed_samples': len(df) - len(successful_results),
-        'diffusion_steps': total_steps,
-        'average_exact_match_rate': avg_exact_match,
-        'average_meaningful_rate': avg_meaningful,
-        'average_converged_steps': avg_steps,
-        'timestamp': timestamp
-    }
+    print(f"Loading data from {DATA_PATH}...")
+    data = load_data(DATA_PATH, max_samples=max_samples)
+    print(f"Loaded {len(data)} samples.\n")
 
-    summary_file = os.path.join(output_dir, "summary.json")
-    with open(summary_file, 'w', encoding='utf-8') as f:
-        json.dump(summary, f, indent=2)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    all_summaries = []
 
-    # Print summary
-    print(f"\n{'='*80}")
-    print(f"EXPERIMENT SUMMARY: {model_name}")
-    print(f"{'='*80}")
-    print(f"Total samples: {summary['total_samples']}")
-    print(f"Successful: {summary['successful_samples']}")
-    print(f"Failed: {summary['failed_samples']}")
-    print(f"Average exact match rate: {summary['average_exact_match_rate']:.2%}")
-    print(f"Average meaningful rate: {summary['average_meaningful_rate']:.2%}")
-    print(f"Average converged steps: {summary['average_converged_steps']:.1f}")
-    print(f"\nResults saved to: {output_dir}")
-    print(f"{'='*80}\n")
+    for model_name, meta in models_to_run.items():
+        print(f"{'=' * 60}")
+        print(f"  Model: {model_name}  ({meta['id']})")
+        print(f"{'=' * 60}")
 
-    # Cleanup
-    del model
-    del tokenizer
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
-    import gc
-    gc.collect()
+        # ── Load model ──────────────────────────────────────────────
+        t0 = time.time()
+        try:
+            tokenizer = AutoTokenizer.from_pretrained(meta["id"], trust_remote_code=True)
+            model = AutoModel.from_pretrained(
+                meta["id"],
+                torch_dtype=torch.bfloat16 if DEVICE == "cuda" else torch.float32,
+                trust_remote_code=True,
+            ).to(DEVICE).eval()
+            print(f"  Loaded in {time.time() - t0:.1f}s")
+        except Exception as e:
+            print(f"  FAILED to load: {e}")
+            all_summaries.append({"model": model_name, "error": str(e)})
+            continue
 
-    return summary
+        mask_token = meta["mask_token"]
+
+        # ── Inference loop ──────────────────────────────────────────
+        results = []
+        total_id_correct = 0
+        total_id_count = 0
+        skipped = 0
+        errors = 0
+
+        for row in tqdm(data, desc=f"  {model_name}"):
+            item_id = row["id"]
+            masked_code = row["masked_code"]
+            target = row["target"]
+
+            try:
+                # 1. Reconstruct original code
+                original_code = masked_code.replace("[MASK]", target)
+
+                # 2. Obfuscate
+                obfuscated_code, obfuscation_map = obfuscate_java_code(original_code)
+                if not obfuscation_map:
+                    results.append({"id": item_id, "skipped": "no_identifiers"})
+                    skipped += 1
+                    continue
+
+                # 3. Replace obfuscated names with <|mask|> tokens
+                input_code, template, positions = prepare_masked_input(
+                    obfuscated_code, obfuscation_map, mask_token, NUM_MASK_TOKENS,
+                )
+
+                # 4. Tokenize and check length
+                inputs = tokenizer(input_code, return_tensors="pt")
+                input_ids = inputs.input_ids.to(DEVICE)
+                attention_mask = inputs.attention_mask.to(DEVICE)
+
+                if input_ids.shape[1] > MAX_INPUT_TOKENS:
+                    results.append({
+                        "id": item_id, "skipped": "too_long",
+                        "token_length": input_ids.shape[1],
+                    })
+                    skipped += 1
+                    continue
+
+                # 5. Diffusion generation (same params as RQ1 benchmark)
+                with torch.no_grad():
+                    output = model.diffusion_generate(
+                        input_ids,
+                        attention_mask=attention_mask,
+                        max_new_tokens=1,
+                        steps=DIFFUSION_STEPS,
+                        temperature=0.3,
+                        top_p=0.95,
+                        alg="entropy",
+                        alg_temp=0.,
+                    )
+
+                generated_ids = output.sequences[0] if hasattr(output, "sequences") else output[0]
+                full_output = tokenizer.decode(generated_ids, skip_special_tokens=True)
+
+                # 6. Extract predictions
+                predictions = extract_deobfuscation_predictions(full_output, template)
+
+                # 7. Evaluate
+                metrics = evaluate_predictions(predictions, positions)
+
+                total_id_correct += metrics['identifiers_correct']
+                total_id_count += metrics['identifiers_total']
+
+                results.append({
+                    "id": item_id,
+                    "num_unique_identifiers": metrics['identifiers_total'],
+                    "num_occurrences": len(positions),
+                    "identifiers_correct": metrics['identifiers_correct'],
+                    "identifiers_total": metrics['identifiers_total'],
+                    "per_sample_em_rate": f"{metrics['per_sample_em_rate']:.4f}",
+                    "meaningful_rate": f"{metrics['meaningful_rate']:.4f}",
+                    "predicted_obfuscated_rate": f"{metrics['predicted_obfuscated_rate']:.4f}",
+                    "predictions_json": json.dumps(metrics['majority_predictions']),
+                    "originals_json": json.dumps(metrics['originals']),
+                    "mapping_json": json.dumps(obfuscation_map),
+                    "token_length": input_ids.shape[1],
+                })
+
+            except torch.cuda.OutOfMemoryError:
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                results.append({"id": item_id, "error": "CUDA_OOM"})
+                errors += 1
+            except Exception as e:
+                results.append({"id": item_id, "error": str(e)})
+                errors += 1
+                if errors <= 5:
+                    print(f"    Error on {item_id}: {e}")
+
+        # ── Save results ────────────────────────────────────────────
+        out_file = os.path.join(RESULTS_DIR, f"{model_name}_deobfuscation_{timestamp}.csv")
+        if results:
+            all_keys = set()
+            for r in results:
+                all_keys.update(r.keys())
+            all_keys = sorted(all_keys)
+            with open(out_file, "w", newline="", encoding="utf-8") as f:
+                writer = csv.DictWriter(f, fieldnames=all_keys)
+                writer.writeheader()
+                for r in results:
+                    writer.writerow({k: r.get(k, "") for k in all_keys})
+
+        overall_em = total_id_correct / total_id_count if total_id_count else 0
+        processed = len(data) - skipped - errors
+
+        print(f"\n  --- {model_name} Summary ---")
+        print(f"  Processed:  {processed}/{len(data)}  (skipped={skipped}, errors={errors})")
+        print(f"  Identifier EM: {total_id_correct}/{total_id_count} = {overall_em:.2%}")
+        print(f"  Results: {out_file}\n")
+
+        if hf_repo:
+            upload_to_hf(out_file, hf_repo, hf_token)
+
+        all_summaries.append({
+            "model": model_name,
+            "hf_id": meta["id"],
+            "processed": processed,
+            "skipped": skipped,
+            "errors": errors,
+            "identifier_em": f"{overall_em:.4f}",
+            "id_correct": total_id_correct,
+            "id_total": total_id_count,
+        })
+
+        del model, tokenizer
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        gc.collect()
+
+    # ── Summary table ───────────────────────────────────────────────
+    summary_file = os.path.join(RESULTS_DIR, f"summary_{timestamp}.csv")
+    if all_summaries:
+        with open(summary_file, "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=list(all_summaries[0].keys()))
+            writer.writeheader()
+            writer.writerows(all_summaries)
+
+    print(f"{'=' * 60}")
+    print("  DEOBFUSCATION BENCHMARK SUMMARY")
+    print(f"{'=' * 60}")
+    print(f"  {'Model':<20} {'Identifier EM':>14} {'Processed':>10} {'Skipped':>8}")
+    print(f"  {'-' * 56}")
+    for s in all_summaries:
+        if "error" in s and "identifier_em" not in s:
+            print(f"  {s['model']:<20} LOAD FAILED")
+        else:
+            print(f"  {s['model']:<20} {s['identifier_em']:>14} {s['processed']:>10} {s['skipped']:>8}")
+    print(f"\n  Summary: {summary_file}")
 
 
-def main():
-    parser = argparse.ArgumentParser(description='Deobfuscation Experiment on RefineID Dataset')
-    parser.add_argument('--model', type=str, default='both',
-                        choices=['diffucoder', 'dreamcoder', 'both'],
-                        help='Model to use (default: both)')
-    parser.add_argument('--data', type=str, default='data/test_filtered_1024.csv',
-                        help='Path to RefineID dataset')
-    parser.add_argument('--steps', type=int, default=32,
-                        help='Number of diffusion steps (default: 32)')
-    parser.add_argument('--device', type=str, default='cuda',
-                        help='Device to use (default: cuda)')
-    parser.add_argument('--max-samples', type=int, default=None,
-                        help='Maximum number of samples to process')
+# ---- CLI --------------------------------------------------------------------
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(
+        description="RQ2 — Deobfuscation benchmark for diffusion LLMs on RefineID"
+    )
+    parser.add_argument(
+        "--model", action="append", default=None,
+        help="Model name(s) from registry. Repeatable. Default: all.",
+    )
+    parser.add_argument("--max-samples", type=int, default=None)
+    parser.add_argument("--hf-repo", type=str, default=None)
+    parser.add_argument("--hf-token", type=str, default=os.environ.get("HF_TOKEN"))
+    parser.add_argument("--list-models", action="store_true")
 
     args = parser.parse_args()
 
-    # Model configurations
-    models = {
-        'diffucoder': {
-            'name': 'DiffuCoder-7B',
-            'id': 'apple/DiffuCoder-7B-Instruct'
-        },
-        'dreamcoder': {
-            'name': 'DreamCoder-7B',
-            'id': 'Dream-org/Dream-Coder-v0-Instruct-7B'
-        }
-    }
+    if args.list_models:
+        print("Available models:")
+        for k, v in MODEL_REGISTRY.items():
+            print(f"  {k:<30} {v['id']}")
+        sys.exit(0)
 
-    # Run experiments
-    all_summaries = []
-
-    if args.model == 'both':
-        models_to_run = ['diffucoder', 'dreamcoder']
-    else:
-        models_to_run = [args.model]
-
-    for model_key in models_to_run:
-        model_config = models[model_key]
-        summary = run_deobfuscation_experiment(
-            model_name=model_config['name'],
-            model_id=model_config['id'],
-            data_path=args.data,
-            total_steps=args.steps,
-            device=args.device,
-            max_samples=args.max_samples
-        )
-        all_summaries.append(summary)
-
-    # Print comparison if both models were run
-    if len(all_summaries) == 2:
-        print(f"\n{'='*80}")
-        print("MODEL COMPARISON")
-        print(f"{'='*80}")
-        print(f"{'Model':<20} {'Exact Match':<15} {'Meaningful':<15} {'Avg Steps':<15}")
-        print("-" * 80)
-        for s in all_summaries:
-            print(f"{s['model_name']:<20} {s['average_exact_match_rate']:<15.2%} "
-                  f"{s['average_meaningful_rate']:<15.2%} {s['average_converged_steps']:<15.1f}")
-        print(f"{'='*80}\n")
-
-
-if __name__ == "__main__":
-    main()
+    run_experiment(
+        target_models=args.model,
+        max_samples=args.max_samples,
+        hf_repo=args.hf_repo,
+        hf_token=args.hf_token,
+    )
