@@ -1,16 +1,24 @@
 """
-Benchmark diffusion language models (DiffuCoder, DreamCoder) on the refineID task.
+Benchmark diffusion language models (DiffuCoder, DreamCoder, DreamOn) on the refineID task.
 
-This script evaluates the identifier renaming ability of diffusion models
-by replacing [MASK] with multiple <|mask|> tokens and performing continuous in-filling
-in a single forward/diffusion pass, without any instructional prompts.
+For DiffuCoder / DreamCoder:
+    Replace each [MASK] with NUM_MASK_TOKENS <|mask|> tokens and run a single
+    diffusion_generate pass over the whole sequence.
+
+For DreamOn (Dream-org/DreamOn-v0-7B):
+    DreamOn is a variable-length code infilling model that expects the input
+    framed as  BOS + prefix_ids + [mask_id]*N + suffix_ids + EOS.
+    Each [MASK] site is therefore processed independently as its own infilling
+    prompt. We start with NUM_MASK_TOKENS mask tokens and let DreamOn expand
+    /contract the canvas up to DREAMON_MAX_NEW_TOKENS during diffusion.
 
 Data:   data/test.csv (full 1000-sample test set)
-Metric: Exact Match
+Metric: Exact Match (on the first masked site)
 
 Usage:
     python experiments/benchmark_diffusion_models.py                        # run all models
     python experiments/benchmark_diffusion_models.py --model DiffuCoder-7B  # single model
+    python experiments/benchmark_diffusion_models.py --model DreamOn-7B     # DreamOn only
     python experiments/benchmark_diffusion_models.py --max-samples 100      # quick test
 """
 
@@ -58,11 +66,15 @@ DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 # Standard identifier mask length for continuous substitution
 NUM_MASK_TOKENS = 2
 
+# DreamOn-specific: max canvas size after expansion (must be >= NUM_MASK_TOKENS)
+DREAMON_MAX_NEW_TOKENS = 32
+
 # ---- Model Registry --------------------------------------------------------
 
 MODEL_REGISTRY = {
     "DiffuCoder-7B":     {"id": "apple/DiffuCoder-7B-Base", "type": "diffucoder", "mask_token": "<|mask|>"},
     "DreamCoder-7B":     {"id": "Dream-org/Dream-Coder-v0-Instruct-7B", "type": "dreamcoder", "mask_token": "<|mask|>"},
+    "DreamOn-7B":        {"id": "Dream-org/DreamOn-v0-7B", "type": "dreamon", "mask_token": None},
 }
 
 
@@ -119,6 +131,86 @@ def extract_all_predictions(full_code, masked_code):
         predictions.append(match.group(0) if match else gap_content[:20])
         
     return predictions
+
+
+# ---- DreamOn Inference ------------------------------------------------------
+
+def build_dreamon_input(prefix, suffix, tokenizer, num_mask_tokens):
+    """Build the BOS + prefix + masks + suffix + EOS infilling prompt for DreamOn."""
+    bos = tokenizer.bos_token_id
+    eos = tokenizer.eos_token_id
+    mask_id = tokenizer.mask_token_id
+    pre_ids = tokenizer.encode(prefix, add_special_tokens=False)
+    suf_ids = tokenizer.encode(suffix, add_special_tokens=False)
+    ids = [bos] + pre_ids + [mask_id] * num_mask_tokens + suf_ids + [eos]
+    return ids, len(pre_ids) + 1, num_mask_tokens  # ids, infill_start (after BOS+prefix), initial_canvas_len
+
+
+def extract_dreamon_infill(generated_ids, tokenizer, prefix, suffix):
+    """Decode DreamOn output and slice out the segment between prefix and suffix."""
+    full = tokenizer.decode(generated_ids, skip_special_tokens=True)
+    # Anchor on prefix tail / suffix head to locate the infilled span
+    pre_anchor = prefix.strip()[-30:] if len(prefix.strip()) > 30 else prefix.strip()
+    suf_anchor = suffix.strip()[:30] if len(suffix.strip()) > 30 else suffix.strip()
+
+    if pre_anchor:
+        i = full.rfind(pre_anchor)
+        start = i + len(pre_anchor) if i != -1 else 0
+    else:
+        start = 0
+    if suf_anchor:
+        j = full.find(suf_anchor, start)
+        end = j if j != -1 else min(start + 60, len(full))
+    else:
+        end = min(start + 60, len(full))
+    return full[start:end].strip()
+
+
+def run_dreamon_per_mask(model, tokenizer, masked_code, num_initial_masks, max_new_tokens, gen_kwargs):
+    """For each [MASK] site, run a separate DreamOn infilling pass.
+
+    Returns:
+        preds: list[str]  - extracted identifier per [MASK] site
+        full_codes: list[str] - decoded outputs (for debugging)
+    """
+    parts = masked_code.split("[MASK]")
+    if len(parts) <= 1:
+        return [], []
+
+    preds = []
+    full_codes = []
+    # Walk masks left-to-right; for each one, prefix = code so far (with PREVIOUSLY
+    # predicted identifiers substituted in), suffix = the rest with remaining [MASK]s.
+    resolved = parts[0]
+    for i in range(len(parts) - 1):
+        prefix = resolved
+        # Suffix = remainder containing remaining masks (but DreamOn only fills the FIRST gap)
+        suffix = "[MASK]".join(parts[i + 1:])
+
+        input_ids, _, _ = build_dreamon_input(prefix, suffix, tokenizer, num_initial_masks)
+        input_ids_t = torch.LongTensor([input_ids]).to(model.device)
+
+        with torch.no_grad():
+            output = model.diffusion_generate(
+                input_ids_t,
+                max_new_tokens=max_new_tokens,
+                return_dict_in_generate=True,
+                output_history=False,
+                **gen_kwargs,
+            )
+        seq = output.sequences[0] if hasattr(output, "sequences") else output[0]
+        gen_text = extract_dreamon_infill(seq, tokenizer, prefix, suffix)
+        full_codes.append(tokenizer.decode(seq, skip_special_tokens=True))
+
+        # Pull a Java identifier out of the gap text
+        m = re.search(r'[a-zA-Z_$][a-zA-Z0-9_$]*', gen_text)
+        ident = m.group(0) if m else gen_text[:20]
+        preds.append(ident)
+
+        # Splice the predicted identifier in so the next prefix sees consistent code
+        resolved = prefix + ident + parts[i + 1]
+
+    return preds, full_codes
 
 
 # ---- Data Loading -----------------------------------------------------------
@@ -250,41 +342,54 @@ def run_benchmark(target_models=None, max_samples=None, hf_repo=None, hf_token=N
             ground_truth = row["target"]
 
             try:
-                # 1. Substitute [MASK] with <|mask|> * NUM_MASK_TOKENS
-                multi_mask = meta["mask_token"] * NUM_MASK_TOKENS
-                input_code = masked_code.replace("[MASK]", multi_mask)
-
-                # 2. Tokenize
-                inputs = tokenizer(input_code, return_tensors="pt")
-                input_ids = inputs.input_ids.to(model.device)
-                attention_mask = inputs.attention_mask.to(model.device)
-
-                # 3. Diffusion Generation Step
-                # Default 64 steps for Diffusion Language Models usually provides solid convergence
-                # Temperature 0.3 matches previous scripts
-                with torch.no_grad():
-                    output = model.diffusion_generate(
-                        input_ids,
-                        attention_mask=attention_mask,
-                        max_new_tokens=1, 
-                        steps=64,
-                        temperature=0.3,
-                        top_p=0.95,
+                if meta["type"] == "dreamon":
+                    # DreamOn: per-mask infilling with BOS/EOS framing
+                    dreamon_kwargs = dict(
+                        temperature=0.2,
                         alg="entropy",
-                        alg_temp=0.
+                        alg_temp=0.0,
+                        top_p=0.9,
+                        number_transfer_tokens=1,
                     )
+                    preds, full_codes = run_dreamon_per_mask(
+                        model, tokenizer, masked_code,
+                        num_initial_masks=NUM_MASK_TOKENS,
+                        max_new_tokens=DREAMON_MAX_NEW_TOKENS,
+                        gen_kwargs=dreamon_kwargs,
+                    )
+                    full_code_len = sum(len(c) for c in full_codes)
+                else:
+                    # 1. Substitute [MASK] with <|mask|> * NUM_MASK_TOKENS
+                    multi_mask = meta["mask_token"] * NUM_MASK_TOKENS
+                    input_code = masked_code.replace("[MASK]", multi_mask)
 
-                # Decode the entire denoised sequence
-                generated_ids = output.sequences[0] if hasattr(output, "sequences") else output[0]
-                full_code = tokenizer.decode(generated_ids, skip_special_tokens=True)
+                    # 2. Tokenize
+                    inputs = tokenizer(input_code, return_tensors="pt")
+                    input_ids = inputs.input_ids.to(model.device)
+                    attention_mask = inputs.attention_mask.to(model.device)
 
-                # 4. Extract all prediction sites
-                preds = extract_all_predictions(full_code, masked_code)
+                    # 3. Diffusion Generation Step
+                    with torch.no_grad():
+                        output = model.diffusion_generate(
+                            input_ids,
+                            attention_mask=attention_mask,
+                            max_new_tokens=1,
+                            steps=64,
+                            temperature=0.3,
+                            top_p=0.95,
+                            alg="entropy",
+                            alg_temp=0.,
+                        )
+
+                    generated_ids = output.sequences[0] if hasattr(output, "sequences") else output[0]
+                    full_code = tokenizer.decode(generated_ids, skip_special_tokens=True)
+                    preds = extract_all_predictions(full_code, masked_code)
+                    full_code_len = len(full_code)
 
                 # primary_pred uses the first mask prediction
                 primary_pred = preds[0] if preds else ""
                 is_correct = (primary_pred == ground_truth)
-                
+
                 if is_correct:
                     correct += 1
 
@@ -295,7 +400,7 @@ def run_benchmark(target_models=None, max_samples=None, hf_repo=None, hf_token=N
                     "correct": is_correct,
                     "mask_count": masked_code.count("[MASK]"),
                     "all_predictions": "|".join(preds),
-                    "full_code_length": len(full_code),
+                    "full_code_length": full_code_len,
                 })
             except Exception as e:
                 errors += 1
