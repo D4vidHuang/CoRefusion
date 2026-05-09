@@ -11,18 +11,16 @@ For each [MASK] slot we run one forward pass: replace the slot with
 <extra_id_0> in the encoder input and parse the span the decoder emits
 between <extra_id_0> and the next sentinel (mirroring the AR FIM loop).
 
-Two model families share this script:
-  * "codet5"  / "codet5p"        -- the original 60M/220M/770M family
-                                    (T5 tokenizer with sentinel tokens).
-  * "codet5p_large"              -- full-size CodeT5+ (2B / 6B / 16B):
-                                    CodeGen tokenizer, no native sentinel,
-                                    custom_code arch. The model card uses
-                                    fp16 + low_cpu_mem_usage + decoder
-                                    primed with input_ids.clone(); we mirror
-                                    that path so the encoder sees the
-                                    prefix+<extra_id_0>+suffix prompt and
-                                    the decoder is teacher-forced from the
-                                    encoder side.
+All variants share the *same* prompting protocol so the benchmark stays
+methodologically consistent with the AR FIM script (encoder sees both
+sides of the slot, decoder fills it). The only "_large" specialisation
+is at load time (fp16 + low_cpu_mem_usage + trust_remote_code) because
+the 2B/6B/16B checkpoints use a CodeGen tokenizer and a custom remote
+arch and won't fit in bf16 without low_cpu_mem_usage.
+
+Model types:
+  * "codet5"  / "codet5p"        -- 60M / 220M / 770M, T5 tokenizer.
+  * "codet5p_large"              -- 2B / 6B / 16B, CodeGen tokenizer.
 
 Data:   data/test.csv
 Metric: Exact Match on the first masked identifier (same as AR benchmark).
@@ -206,70 +204,40 @@ def run_t5_on_sample(masked_code, model, tokenizer, max_input_tokens, model_type
         suffix = parts[1] if len(parts) > 1 else ""
 
         prefix_t, suffix_t = truncate_for_fim(prefix, suffix, tokenizer, max_input_tokens)
+        t5_input = build_t5_single_slot_input(prefix_t, suffix_t)
+        prompts.append(t5_input)
 
+        inputs = tokenizer(
+            t5_input,
+            return_tensors="pt",
+            truncation=True,
+            max_length=max_input_tokens,
+        ).to(model.device)
+
+        gen_kwargs = dict(
+            max_new_tokens=MAX_NEW_TOKENS,
+            do_sample=False,
+            num_beams=1,
+        )
+
+        # CodeT5+ 2B/6B/16B uses the CodeGen tokenizer which has no PAD;
+        # generate() needs an explicit pad_token_id to suppress warnings
+        # and to terminate cleanly. Decoder start defers to the model
+        # config's decoder_start_token_id (same as the small variants).
         if is_codet5p_large(model_type):
-            # CodeT5+ 2B/6B/16B: CodeGen tokenizer + CodeGen-mono decoder.
-            # No native sentinel and stage-2 pretraining was pure CLM, so we
-            # use it as a prefix-only completion model per the model card:
-            # encoder gets the prefix, decoder is primed with the same tokens
-            # (input_ids.clone()), and we generate a short continuation.
-            t5_input = prefix_t
-            prompts.append(t5_input)
-
-            inputs = tokenizer(
-                t5_input,
-                return_tensors="pt",
-                truncation=True,
-                max_length=max_input_tokens,
-            ).to(model.device)
-            inputs["decoder_input_ids"] = inputs["input_ids"].clone()
-
-            gen_kwargs = dict(
-                max_new_tokens=MAX_NEW_TOKENS,
-                do_sample=False,
-                num_beams=1,
-            )
             if tokenizer.pad_token_id is not None:
                 gen_kwargs["pad_token_id"] = tokenizer.pad_token_id
             elif tokenizer.eos_token_id is not None:
                 gen_kwargs["pad_token_id"] = tokenizer.eos_token_id
 
-            with torch.no_grad():
-                outputs = model.generate(**inputs, **gen_kwargs)
+        with torch.no_grad():
+            outputs = model.generate(**inputs, **gen_kwargs)
 
-            # The primed decoder echoes the prefix; only the suffix is new.
-            new_token_ids = outputs[0][inputs["decoder_input_ids"].shape[1]:]
-            raw_pred = tokenizer.decode(new_token_ids, skip_special_tokens=False)
-        else:
-            t5_input = build_t5_single_slot_input(prefix_t, suffix_t)
-            prompts.append(t5_input)
-
-            inputs = tokenizer(
-                t5_input,
-                return_tensors="pt",
-                truncation=True,
-                max_length=max_input_tokens,
-            ).to(model.device)
-
-            with torch.no_grad():
-                outputs = model.generate(
-                    **inputs,
-                    max_new_tokens=MAX_NEW_TOKENS,
-                    do_sample=False,
-                    num_beams=1,
-                )
-
-            raw_pred = tokenizer.decode(outputs[0], skip_special_tokens=False)
+        raw_pred = tokenizer.decode(outputs[0], skip_special_tokens=False)
         raw_predictions.append(raw_pred)
 
-        if is_codet5p_large(model_type):
-            # No sentinels in CodeGen-style output -- strip pad/eos and
-            # extract the first identifier from the raw continuation.
-            cleaned = raw_pred.replace("<pad>", "").replace("<|endoftext|>", "")
-            pred = clean_identifier(cleaned)
-        else:
-            span = parse_t5_first_span(raw_pred)
-            pred = clean_identifier(span)
+        span = parse_t5_first_span(raw_pred)
+        pred = clean_identifier(span)
         predictions.append(pred)
 
         current_code = prefix + pred + suffix
