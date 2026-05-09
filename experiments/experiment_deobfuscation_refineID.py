@@ -1,25 +1,29 @@
 """
 RQ2 — Deobfuscation Experiment on RefineID Dataset
 
-Tests whether diffusion LLMs can recover meaningful variable names when ALL
-identifiers are obfuscated (a, b, c, ...) and replaced with <|mask|> tokens.
+Three modes for evaluating localization–filling asymmetry:
 
-Pipeline per sample:
-  1. Reconstruct original code from masked_code + target
-  2. Extract all identifier positions via regex
-  3. Obfuscate: replace each unique identifier with a, b, c, ...
-  4. Replace each obfuscated name with <|mask|> * NUM_MASK_TOKENS
-  5. Run model.diffusion_generate() (same params as RQ1 benchmark)
-  6. Extract predictions via anchor-based matching
-  7. Compare predictions with original names (majority vote per identifier)
+  --mode all-masked   (default)
+      Mask ALL identifiers simultaneously. Tests full deobfuscation ability.
+      Expected: very low EM — demonstrates filling fails without context.
+
+  --mode target-only
+      Obfuscate ALL variables to a,b,c but only mask the TARGET variable.
+      The rest of the code retains obfuscated (bad) names as context.
+      Directly comparable with RQ1: same single-target fill, degraded context.
+
+  --mode sequential
+      Mask and fill one identifier at a time (most-frequent first).
+      Each filled identifier is inserted back before the next is attempted.
+      Tests whether iterative recovery improves over all-at-once.
 
 Models: DiffuCoder-7B-Base, DreamCoder-7B
 Data:   data/test.csv (same 1000 samples as RQ1 benchmark)
 
 Usage:
-    python experiments/experiment_deobfuscation_refineID.py
-    python experiments/experiment_deobfuscation_refineID.py --model diffucoder --max-samples 50
-    python experiments/experiment_deobfuscation_refineID.py --list-models
+    python experiments/experiment_deobfuscation_refineID.py --mode target-only --max-samples 50
+    python experiments/experiment_deobfuscation_refineID.py --mode all-masked
+    python experiments/experiment_deobfuscation_refineID.py --mode sequential --max-samples 100
 """
 
 import os
@@ -379,6 +383,93 @@ def evaluate_predictions(
     }
 
 
+# ---- Sequential Fill --------------------------------------------------------
+
+def _run_sequential_fill(model, tokenizer, obfuscated_code, obfuscation_map,
+                         mask_token, num_mask_tokens, diffusion_steps, device,
+                         max_input_tokens):
+    """
+    Fill identifiers one at a time, most-frequent first.
+    After each fill, substitute the prediction back into the code for the next round.
+    """
+    reverse_map = {v: k for k, v in obfuscation_map.items()}
+    current_code = obfuscated_code
+
+    # Sort identifiers by occurrence count (most frequent first — gives model most context benefit)
+    occ_counts = {}
+    for obf_name in reverse_map:
+        occ_counts[obf_name] = len(re.findall(r'\b' + re.escape(obf_name) + r'\b', current_code))
+    sorted_obf = sorted(reverse_map.keys(), key=lambda n: occ_counts.get(n, 0), reverse=True)
+
+    majority_predictions = {}
+    originals = {}
+
+    for obf_name in sorted_obf:
+        orig_name = reverse_map[obf_name]
+        originals[orig_name] = obf_name
+
+        # Mask only this one identifier
+        single_map = {orig_name: obf_name}
+        try:
+            input_code, template, positions = prepare_masked_input(
+                current_code, single_map, mask_token, num_mask_tokens,
+            )
+        except Exception:
+            majority_predictions[orig_name] = ""
+            continue
+
+        inputs = tokenizer(input_code, return_tensors="pt")
+        input_ids = inputs.input_ids.to(device)
+        attention_mask = inputs.attention_mask.to(device)
+
+        if input_ids.shape[1] > max_input_tokens:
+            majority_predictions[orig_name] = ""
+            continue
+
+        try:
+            with torch.no_grad():
+                output = model.diffusion_generate(
+                    input_ids, attention_mask=attention_mask,
+                    max_new_tokens=1, steps=diffusion_steps,
+                    temperature=0.3, top_p=0.95, alg="entropy", alg_temp=0.,
+                )
+            generated_ids = output.sequences[0] if hasattr(output, "sequences") else output[0]
+            full_output = tokenizer.decode(generated_ids, skip_special_tokens=True)
+
+            preds = extract_deobfuscation_predictions(full_output, template)
+            # Majority vote across occurrences
+            counter = Counter(p for p in preds if p)
+            pred = counter.most_common(1)[0][0] if counter else ""
+        except Exception:
+            pred = ""
+
+        majority_predictions[orig_name] = pred
+
+        # Substitute the prediction back into code for next identifier
+        if pred:
+            pattern = re.compile(r'\b' + re.escape(obf_name) + r'\b')
+            current_code = pattern.sub(pred, current_code)
+
+    # Compute metrics
+    total = len(majority_predictions)
+    correct = sum(1 for orig, pred in majority_predictions.items() if pred == orig)
+    meaningful = sum(1 for pred in majority_predictions.values() if len(pred) > 1)
+    obf_back = sum(1 for orig in majority_predictions
+                   if majority_predictions[orig] == originals.get(orig, ''))
+
+    return {
+        'identifiers_correct': correct,
+        'identifiers_total': total,
+        'per_sample_em_rate': correct / total if total else 0.0,
+        'meaningful_rate': meaningful / total if total else 0.0,
+        'predicted_obfuscated_rate': obf_back / total if total else 0.0,
+        'majority_predictions': majority_predictions,
+        'originals': originals,
+        'num_occurrences': sum(occ_counts.values()),
+        'token_length': 0,
+    }
+
+
 # ---- Data Loading -----------------------------------------------------------
 
 def load_data(data_path, max_samples=None):
@@ -419,7 +510,8 @@ def upload_to_hf(file_path, repo_id, token, path_in_repo=None):
 
 # ---- Main Experiment --------------------------------------------------------
 
-def run_experiment(target_models=None, max_samples=None, hf_repo=None, hf_token=None):
+def run_experiment(target_models=None, max_samples=None, hf_repo=None, hf_token=None,
+                   mode="all-masked"):
     os.makedirs(RESULTS_DIR, exist_ok=True)
 
     if target_models:
@@ -432,7 +524,8 @@ def run_experiment(target_models=None, max_samples=None, hf_repo=None, hf_token=
 
     print(f"Loading data from {DATA_PATH}...")
     data = load_data(DATA_PATH, max_samples=max_samples)
-    print(f"Loaded {len(data)} samples.\n")
+    print(f"Loaded {len(data)} samples.")
+    print(f"Mode: {mode}\n")
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     all_summaries = []
@@ -468,25 +561,73 @@ def run_experiment(target_models=None, max_samples=None, hf_repo=None, hf_token=
 
         for row in tqdm(data, desc=f"  {model_name}"):
             item_id = row["id"]
-            masked_code = row["masked_code"]
+            masked_code_raw = row["masked_code"]
             target = row["target"]
 
             try:
                 # 1. Reconstruct original code
-                original_code = masked_code.replace("[MASK]", target)
+                original_code = masked_code_raw.replace("[MASK]", target)
 
-                # 2. Obfuscate
+                # 2. Obfuscate ALL identifiers
                 obfuscated_code, obfuscation_map = obfuscate_java_code(original_code)
                 if not obfuscation_map:
                     results.append({"id": item_id, "skipped": "no_identifiers"})
                     skipped += 1
                     continue
 
-                # 3. Replace obfuscated names with <|mask|> tokens
-                input_code, template, positions = prepare_masked_input(
-                    obfuscated_code, obfuscation_map, mask_token, NUM_MASK_TOKENS,
-                )
+                # 3. Build input depending on mode
+                if mode == "target-only":
+                    # Only mask the TARGET variable; keep other obfuscated names
+                    # Find the obfuscated name for the target
+                    target_obf = obfuscation_map.get(target)
+                    if not target_obf:
+                        results.append({"id": item_id, "skipped": "target_not_in_map"})
+                        skipped += 1
+                        continue
+                    # Replace only the target's obfuscated name with masks
+                    target_mask_map = {target: target_obf}
+                    input_code, template, positions = prepare_masked_input(
+                        obfuscated_code, target_mask_map, mask_token, NUM_MASK_TOKENS,
+                    )
+                elif mode == "sequential":
+                    # Will be handled below in a separate loop
+                    pass
+                else:  # all-masked
+                    input_code, template, positions = prepare_masked_input(
+                        obfuscated_code, obfuscation_map, mask_token, NUM_MASK_TOKENS,
+                    )
 
+                # --- Sequential mode: fill one identifier at a time ---
+                if mode == "sequential":
+                    seq_results = _run_sequential_fill(
+                        model, tokenizer, obfuscated_code, obfuscation_map,
+                        mask_token, NUM_MASK_TOKENS, DIFFUSION_STEPS, DEVICE,
+                        MAX_INPUT_TOKENS,
+                    )
+                    if seq_results is None:
+                        results.append({"id": item_id, "skipped": "seq_failed"})
+                        skipped += 1
+                        continue
+                    metrics = seq_results
+                    total_id_correct += metrics['identifiers_correct']
+                    total_id_count += metrics['identifiers_total']
+                    results.append({
+                        "id": item_id,
+                        "num_unique_identifiers": metrics['identifiers_total'],
+                        "num_occurrences": metrics.get('num_occurrences', 0),
+                        "identifiers_correct": metrics['identifiers_correct'],
+                        "identifiers_total": metrics['identifiers_total'],
+                        "per_sample_em_rate": f"{metrics['per_sample_em_rate']:.4f}",
+                        "meaningful_rate": f"{metrics['meaningful_rate']:.4f}",
+                        "predicted_obfuscated_rate": f"{metrics['predicted_obfuscated_rate']:.4f}",
+                        "predictions_json": json.dumps(metrics['majority_predictions']),
+                        "originals_json": json.dumps(metrics['originals']),
+                        "mapping_json": json.dumps(obfuscation_map),
+                        "token_length": metrics.get('token_length', 0),
+                    })
+                    continue
+
+                # --- Non-sequential modes (all-masked, target-only) ---
                 # 4. Tokenize and check length
                 inputs = tokenizer(input_code, return_tensors="pt")
                 input_ids = inputs.input_ids.to(DEVICE)
@@ -552,7 +693,7 @@ def run_experiment(target_models=None, max_samples=None, hf_repo=None, hf_token=
                     print(f"    Error on {item_id}: {e}")
 
         # ── Save results ────────────────────────────────────────────
-        out_file = os.path.join(RESULTS_DIR, f"{model_name}_deobfuscation_{timestamp}.csv")
+        out_file = os.path.join(RESULTS_DIR, f"{model_name}_{mode}_{timestamp}.csv")
         if results:
             all_keys = set()
             for r in results:
@@ -616,11 +757,17 @@ def run_experiment(target_models=None, max_samples=None, hf_repo=None, hf_token=
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="RQ2 — Deobfuscation benchmark for diffusion LLMs on RefineID"
+        description="RQ2 — Deobfuscation benchmark for diffusion LLMs on RefineID",
+        allow_abbrev=False,  # prevent --mode being matched as --model prefix
     )
     parser.add_argument(
         "--model", action="append", default=None,
         help="Model name(s) from registry. Repeatable. Default: all.",
+    )
+    parser.add_argument(
+        "--mode", choices=["all-masked", "target-only", "sequential"],
+        default="all-masked",
+        help="Experiment mode (default: all-masked).",
     )
     parser.add_argument("--max-samples", type=int, default=None)
     parser.add_argument("--hf-repo", type=str, default=None)
@@ -640,4 +787,5 @@ if __name__ == "__main__":
         max_samples=args.max_samples,
         hf_repo=args.hf_repo,
         hf_token=args.hf_token,
+        mode=args.mode,
     )
