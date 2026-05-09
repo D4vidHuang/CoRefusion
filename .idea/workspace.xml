@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="ChangeListManager">
+    <list default="true" id="a5bc466b-3194-46d6-9d00-c0873aa52a5e" name="Changes" comment="">
+      <change beforePath="$PROJECT_DIR$/external_repos/Dream-Coder/base/lm_eval/api/__init__.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/external_repos/Dream-Coder/base/lm_eval/caching/__init__.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/external_repos/Dream-Coder/base/lm_eval/decontamination/__init__.py" beforeDir="false" />
+    </list>
+    <option name="SHOW_DIALOG" value="false" />
+    <option name="HIGHLIGHT_CONFLICTS" value="true" />
+    <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
+    <option name="LAST_RESOLUTION" value="IGNORE" />
+  </component>
+  <component name="Git.Settings">
+    <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$" />
+  </component>
+  <component name="GitHubPullRequestSearchHistory"><![CDATA[{
+  "lastFilter": {}
+}]]></component>
+  <component name="GithubPullRequestsUISettings"><![CDATA[{
+  "selectedUrlAndAccountId": {
+    "url": "https://github.com/D4vidHuang/CoRefusion.git",
+    "accountId": "31fe86f4-1e05-4bc2-9970-bfcb0aa947da"
+  }
+}]]></component>
+  <component name="ProjectColorInfo"><![CDATA[{
+  "associatedIndex": 2,
+  "fromUser": false
+}]]></component>
+  <component name="ProjectId" id="3DTwFuNRn9NLo6bE64JMMCpQpYQ" />
+  <component name="PropertiesComponent"><![CDATA[{
+  "keyToString": {
+    "ModuleVcsDetector.initialDetectionPerformed": "true",
+    "RunOnceActivity.ShowReadmeOnStart": "true",
+    "git-widget-placeholder": "feat/dreamon-benchmark",
+    "last_opened_file_path": "/Users/davidhuang/Desktop/CoRefusion"
+  }
+}]]></component>
+  <component name="Vcs.Log.Tabs.Properties">
+    <option name="TAB_STATES">
+      <map>
+        <entry key="">
+          <value>
+            <State />
+          </value>
+        </entry>
+      </map>
+    </option>
+  </component>
+</project>
