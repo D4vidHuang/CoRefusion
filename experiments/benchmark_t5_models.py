@@ -7,20 +7,9 @@ identifier-filling task. CodeT5 in particular had "identifier unmasking"
 as an explicit pretraining objective (IT -- Identifier Tagging /
 MIP -- Masked Identifier Prediction), so we expect strong performance.
 
-For each [MASK] slot we run one forward pass: replace the slot with
-<extra_id_0> in the encoder input and parse the span the decoder emits
-between <extra_id_0> and the next sentinel (mirroring the AR FIM loop).
-
-All variants share the *same* prompting protocol so the benchmark stays
-methodologically consistent with the AR FIM script (encoder sees both
-sides of the slot, decoder fills it). The only "_large" specialisation
-is at load time (fp16 + low_cpu_mem_usage + trust_remote_code) because
-the 2B/6B/16B checkpoints use a CodeGen tokenizer and a custom remote
-arch and won't fit in bf16 without low_cpu_mem_usage.
-
-Model types:
-  * "codet5"  / "codet5p"        -- 60M / 220M / 770M, T5 tokenizer.
-  * "codet5p_large"              -- 2B / 6B / 16B, CodeGen tokenizer.
+Unlike the AR FIM benchmark, a single forward pass fills *all* masks at
+once: we replace the i-th [MASK] with <extra_id_i> and parse the decoder
+output which alternates sentinels and predicted spans.
 
 Data:   data/test.csv
 Metric: Exact Match on the first masked identifier (same as AR benchmark).
@@ -28,7 +17,6 @@ Metric: Exact Match on the first masked identifier (same as AR benchmark).
 Usage:
     python experiments/benchmark_t5_models.py
     python experiments/benchmark_t5_models.py --model CodeT5p-770M
-    python experiments/benchmark_t5_models.py --model CodeT5p-2B
     python experiments/benchmark_t5_models.py --max-samples 100
 """
 
@@ -64,23 +52,18 @@ MAX_INPUT_TOKENS = 512 # most CodeT5 variants are 512; CodeT5+ allows more
 # ---- Model Registry --------------------------------------------------------
 # "max_ctx" = encoder input length the model was trained with.
 # CodeT5 family == 512; CodeT5+ 770M and larger support up to 2048.
-# The 2B/6B/16B variants use the CodeGen tokenizer + custom remote code,
-# so they get their own type ("codet5p_large") for fp16 + decoder-priming.
 
 MODEL_REGISTRY = {
-    "CodeT5-small":       {"id": "Salesforce/codet5-small",        "type": "codet5",         "max_ctx": 512},
-    "CodeT5-base":        {"id": "Salesforce/codet5-base",         "type": "codet5",         "max_ctx": 512},
-    "CodeT5-large":       {"id": "Salesforce/codet5-large",        "type": "codet5",         "max_ctx": 512},
-    "CodeT5p-220M":       {"id": "Salesforce/codet5p-220m",        "type": "codet5p",        "max_ctx": 512},
-    "CodeT5p-770M":       {"id": "Salesforce/codet5p-770m",        "type": "codet5p",        "max_ctx": 512},
-    "CodeT5p-2B":         {"id": "Salesforce/codet5p-2b",          "type": "codet5p_large",  "max_ctx": 2048},
-    "CodeT5p-6B":         {"id": "Salesforce/codet5p-6b",          "type": "codet5p_large",  "max_ctx": 2048},
-    "CodeT5p-16B":        {"id": "Salesforce/codet5p-16b",         "type": "codet5p_large",  "max_ctx": 2048},
+    "CodeT5-small":       {"id": "Salesforce/codet5-small",        "type": "codet5",  "max_ctx": 512},
+    "CodeT5-base":        {"id": "Salesforce/codet5-base",         "type": "codet5",  "max_ctx": 512},
+    "CodeT5-large":       {"id": "Salesforce/codet5-large",        "type": "codet5",  "max_ctx": 512},
+    "CodeT5p-220M":       {"id": "Salesforce/codet5p-220m",        "type": "codet5p", "max_ctx": 512},
+    "CodeT5p-770M":       {"id": "Salesforce/codet5p-770m",        "type": "codet5p", "max_ctx": 512},
+    # Full-size CodeT5+ (2B / 6B / 16B) live in a separate script,
+    # benchmark_codet5p_16b.py, because their CodeGen tokenizer + custom
+    # remote arch require the prefix-completion pattern from the model
+    # card and are incompatible with this script's sentinel protocol.
 }
-
-
-def is_codet5p_large(model_type):
-    return model_type == "codet5p_large"
 
 
 # ---- Prompt Construction ---------------------------------------------------
@@ -178,7 +161,7 @@ def truncate_for_fim(prefix, suffix, tokenizer, max_tokens):
 
 # ---- Single-sample Inference -----------------------------------------------
 
-def run_t5_on_sample(masked_code, model, tokenizer, max_input_tokens, model_type="codet5"):
+def run_t5_on_sample(masked_code, model, tokenizer, max_input_tokens):
     """Iterate over [MASK]s and fill one at a time, mirroring AR's FIM loop.
 
     For each mask:
@@ -214,24 +197,13 @@ def run_t5_on_sample(masked_code, model, tokenizer, max_input_tokens, model_type
             max_length=max_input_tokens,
         ).to(model.device)
 
-        gen_kwargs = dict(
-            max_new_tokens=MAX_NEW_TOKENS,
-            do_sample=False,
-            num_beams=1,
-        )
-
-        # CodeT5+ 2B/6B/16B uses the CodeGen tokenizer which has no PAD;
-        # generate() needs an explicit pad_token_id to suppress warnings
-        # and to terminate cleanly. Decoder start defers to the model
-        # config's decoder_start_token_id (same as the small variants).
-        if is_codet5p_large(model_type):
-            if tokenizer.pad_token_id is not None:
-                gen_kwargs["pad_token_id"] = tokenizer.pad_token_id
-            elif tokenizer.eos_token_id is not None:
-                gen_kwargs["pad_token_id"] = tokenizer.eos_token_id
-
         with torch.no_grad():
-            outputs = model.generate(**inputs, **gen_kwargs)
+            outputs = model.generate(
+                **inputs,
+                max_new_tokens=MAX_NEW_TOKENS,
+                do_sample=False,
+                num_beams=1,
+            )
 
         raw_pred = tokenizer.decode(outputs[0], skip_special_tokens=False)
         raw_predictions.append(raw_pred)
@@ -309,17 +281,12 @@ def run_benchmark(target_models=None, max_samples=None, hf_repo=None, hf_token=N
         t0 = time.time()
         try:
             tokenizer = AutoTokenizer.from_pretrained(meta["id"], trust_remote_code=True)
-            load_kwargs = dict(trust_remote_code=True)
-            if is_codet5p_large(meta["type"]):
-                # Per Salesforce/codet5p-{2,6,16}b model card: fp16 +
-                # low_cpu_mem_usage, otherwise the 16B variant won't fit.
-                load_kwargs["torch_dtype"] = torch.float16 if DEVICE == "cuda" else torch.float32
-                load_kwargs["low_cpu_mem_usage"] = True
-            else:
-                load_kwargs["torch_dtype"] = torch.bfloat16 if DEVICE == "cuda" else torch.float32
-            if DEVICE == "cuda":
-                load_kwargs["device_map"] = "auto"
-            model = AutoModelForSeq2SeqLM.from_pretrained(meta["id"], **load_kwargs)
+            model = AutoModelForSeq2SeqLM.from_pretrained(
+                meta["id"],
+                torch_dtype=torch.bfloat16 if DEVICE == "cuda" else torch.float32,
+                device_map="auto" if DEVICE == "cuda" else None,
+                trust_remote_code=True,
+            )
             if DEVICE == "cpu":
                 model = model.to("cpu")
             model.eval()
@@ -343,7 +310,7 @@ def run_benchmark(target_models=None, max_samples=None, hf_repo=None, hf_token=N
 
             try:
                 preds, raw_preds, prompts, final_code = run_t5_on_sample(
-                    masked_code, model, tokenizer, max_ctx, model_type=meta["type"]
+                    masked_code, model, tokenizer, max_ctx
                 )
                 full_len = len(tokenizer.encode(masked_code, add_special_tokens=False))
                 if full_len > max_ctx:
