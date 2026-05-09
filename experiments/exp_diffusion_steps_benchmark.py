@@ -97,17 +97,32 @@ try:
 except ImportError:
     HAS_HF_HUB = False
 
-# ── torchvision guard ──────────────────────────────────────────────────────────
-if "torchvision" in sys.modules and (
-        getattr(sys.modules["torchvision"], "__spec__", None) is None):
-    del sys.modules["torchvision"]
+# ── torchvision mock (required for DiffuCoder/DreamCoder) ─────────────────────
+class _MockModule:
+    def __getattr__(self, name): return _MockModule()
+    def __call__(self, *args, **kwargs): return _MockModule()
+
+sys.modules['torchvision'] = _MockModule()
+sys.modules['torchvision.ops'] = _MockModule()
+sys.modules['torchvision.transforms'] = _MockModule()
+if not hasattr(torch.ops, 'torchvision'):
+    class _DummyOps:
+        def nms(*args, **kwargs): return torch.tensor([])
+    torch.ops.torchvision = _DummyOps()
 
 # ══════════════════════════════════════════════════════════════════════════════
 # Configuration
 # ══════════════════════════════════════════════════════════════════════════════
 
 ROOT_DIR    = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DATA_PATH   = os.path.join(ROOT_DIR, "data", "test.csv")
+# Try multiple paths for data — works from project root, experiments/, or Colab
+_DATA_CANDIDATES = [
+    os.path.join(ROOT_DIR, "data", "test.csv"),
+    "data/test.csv",
+    "CoRefusion/data/test.csv",
+]
+DATA_PATH   = next((p for p in _DATA_CANDIDATES if os.path.exists(p)),
+                   _DATA_CANDIDATES[0])
 RESULTS_DIR = os.path.join(ROOT_DIR, "results", "diffusion_steps_benchmark")
 DEVICE      = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -134,16 +149,11 @@ GEN_KWARGS = dict(
 # ══════════════════════════════════════════════════════════════════════════════
 
 MODEL_REGISTRY = {
-    # ~7 B parameters — two DiffuCoder variants (same arch, different training)
-    "DiffuCoder-7B-Base": {
+    # Same two models as RQ1 benchmark (benchmark_diffusion_models.py)
+    "DiffuCoder-7B": {
         "id":         "apple/DiffuCoder-7B-Base",
         "mask_token": "<|mask|>",
     },
-    "DiffuCoder-7B-Instruct": {
-        "id":         "apple/DiffuCoder-7B-Instruct",
-        "mask_token": "<|mask|>",
-    },
-    # ~7 B parameters — Dream-org model (same param count, different training corpus)
     "DreamCoder-7B": {
         "id":         "Dream-org/Dream-Coder-v0-Instruct-7B",
         "mask_token": "<|mask|>",
