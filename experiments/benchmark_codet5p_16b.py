@@ -53,8 +53,12 @@ import argparse
 import time
 from datetime import datetime
 
+import json
+
 import torch
 from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
+from transformers.dynamic_module_utils import get_class_from_dynamic_module
+from huggingface_hub import hf_hub_download
 from tqdm import tqdm
 
 try:
@@ -228,6 +232,51 @@ def upload_to_hf(file_path, repo_id, token, path_in_repo=None):
         return False
 
 
+# ---- Custom config loader (transformers 4.46+ workaround) ------------------
+
+def load_codet5p_config(checkpoint):
+    """Manually instantiate the CodeT5pConfig, bypassing transformers' loader.
+
+    Why this exists:
+        In transformers >= 4.46, PretrainedConfig.from_dict() (which
+        AutoConfig.from_pretrained and AutoModelForSeq2SeqLM.from_pretrained
+        both go through) preprocesses the dict in ways that drop or rename
+        certain keys before they reach the custom config's __init__. The
+        Salesforce CodeT5pConfig has this guard:
+
+            if "encoder" not in kwargs or "decoder" not in kwargs:
+                raise ValueError("Config has to be initialized with "
+                                 "encoder and decoder config")
+
+        and those nested keys never make it through. The error you see is:
+            "Config has to be initialized with encoder and decoder config"
+
+    Fix:
+        Download config.json from the repo, resolve the custom CodeT5pConfig
+        class via the repo's auto_map (downloads configuration_codet5p.py
+        on demand, the same way trust_remote_code does), and call
+        config_class(**config_dict) directly with the raw JSON dict so the
+        encoder/decoder sub-dicts survive intact.
+    """
+    config_file = hf_hub_download(checkpoint, "config.json")
+    with open(config_file, "r") as f:
+        config_dict = json.load(f)
+
+    auto_map = config_dict.get("auto_map", {})
+    config_class_ref = auto_map.get("AutoConfig")
+    if not config_class_ref:
+        raise RuntimeError(
+            f"{checkpoint}/config.json has no auto_map.AutoConfig entry; "
+            "cannot resolve the custom CodeT5pConfig class."
+        )
+
+    # get_class_from_dynamic_module downloads the .py file referenced in
+    # auto_map (e.g. "configuration_codet5p.CodeT5pConfig") and returns the
+    # class. This is the same machinery trust_remote_code uses.
+    config_class = get_class_from_dynamic_module(config_class_ref, checkpoint)
+    return config_class(**config_dict)
+
+
 # ---- Main Benchmark --------------------------------------------------------
 
 def run_benchmark(model_name, max_samples=None, hf_repo=None, hf_token=None, debug=False):
@@ -250,12 +299,26 @@ def run_benchmark(model_name, max_samples=None, hf_repo=None, hf_token=None, deb
     print(f"  Mode:  prefix-only completion (model-card pattern)")
     print(f"{'='*60}")
 
-    # ── Load model (verbatim from the official model card) ──────────────
+    # ── Load model (model-card pattern + manual config workaround) ──────
+    # The official model card says:
+    #     model = AutoModelForSeq2SeqLM.from_pretrained(
+    #         checkpoint, torch_dtype=torch.float16,
+    #         low_cpu_mem_usage=True, trust_remote_code=True,
+    #     ).to(device)
+    # But on transformers >= 4.46 that path crashes with
+    #   "Config has to be initialized with encoder and decoder config"
+    # because the loader drops the nested encoder/decoder dicts before
+    # they reach CodeT5pConfig.__init__. We pre-build the config manually
+    # (load_codet5p_config) and hand it to from_pretrained so it skips
+    # config re-instantiation. Everything else stays exactly as the
+    # model card prescribes (fp16 + low_cpu_mem_usage + .to(device)).
     t0 = time.time()
     try:
         tokenizer = AutoTokenizer.from_pretrained(meta["id"], trust_remote_code=True)
+        config = load_codet5p_config(meta["id"])
         model = AutoModelForSeq2SeqLM.from_pretrained(
             meta["id"],
+            config=config,
             torch_dtype=torch.float16,
             low_cpu_mem_usage=True,
             trust_remote_code=True,
