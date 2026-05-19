@@ -1,0 +1,15 @@
+{
+  "features": [
+    "avg_flip_step",
+    "first_confident_step",
+    "mean_entropy_change",
+    "max_entropy_change"
+  ],
+  "coef_standardized": [
+    0.1370556976599273,
+    0.26803970167717844,
+    0.8004388139114317,
+    0.5045837689917367
+  ],
+  "intercept": -0.44784154016059374
+}

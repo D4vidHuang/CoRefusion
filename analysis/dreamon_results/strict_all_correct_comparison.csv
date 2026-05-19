@@ -1,0 +1,13 @@
+model,n,first_mask_em,strict_all_em,source
+StarCoder2-7B,230,0.1087,0.0565,all_predictions
+DeepSeek-Coder-6.7B-Base,230,0.0000,0.0000,all_predictions
+DeepSeek-Coder-6.7B-Instruct,230,0.0130,0.0087,full_code re-extracted (0 skipped)
+"DiffuCoder-7B (Base, noPrompt)",230,0.1696,0.1261,full_code re-extracted (0 skipped)
+DiffuCoder-7B,230,0.2348,0.2130,full_code re-extracted (0 skipped)
+"DreamCoder-7B (32 steps, noPrompt)",230,0.2043,0.1565,full_code re-extracted (0 skipped)
+"DreamCoder-7B (64 steps, noPrompt)",230,0.2043,0.1565,full_code re-extracted (0 skipped)
+Llama-3.1-8B-Instruct,230,0.1000,0.0870,full_code re-extracted (0 skipped)
+Qwen2.5-Coder-7B-Instruct,230,0.1783,0.1609,full_code re-extracted (0 skipped)
+CodeT5p-16B,1000,0.2350,0.0790,all_predictions
+"DreamOn-7B (NEW: tiled, all-site coverage)",1000,0.1570,0.0910,predictions (per_sample CSV)
+"DreamOn-7B (OLD: single-window, first-mask)",1000,0.1640,N/A,per-site preds not stored

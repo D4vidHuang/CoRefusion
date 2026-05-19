@@ -1,0 +1,524 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>CoReFusion — Logo</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;700&family=Pixelify+Sans:wght@500;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg:        #ffffff;
+      --blue:      #0076C2;
+      --blue-soft: #0076C2;   /* unified with --blue */
+      --orange:    #FF8000;
+      --mask:      #eef1f5;   /* placeholder block — barely visible */
+      --trans:     #c8cfdb;   /* cycling grey chars — light but readable */
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { width: 100%; height: 100%; overflow: hidden; }
+
+    body {
+      background: var(--bg);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace;
+      position: relative;
+    }
+
+    .wordmark {
+      font-family: 'Pixelify Sans', 'JetBrains Mono', ui-monospace, monospace;
+      font-size: 96px;
+      font-weight: 700;
+      letter-spacing: 0;
+      line-height: 1;
+      display: flex;
+      align-items: center;
+    }
+
+    .char {
+      display: inline-block;
+      width: 0.7em;
+      text-align: center;
+      transition: color 0.15s ease;
+    }
+    .char.co     { color: var(--blue); }
+    .char.re     { color: var(--orange); }
+    .char.fusion { color: var(--blue-soft); }
+    .char.mask   { color: var(--mask); }    /* placeholder █ — very light */
+    .char.trans  { color: var(--trans); }   /* cycling random chars — light grey */
+
+    .cursor {
+      display: inline-block;
+      width: 5px;
+      height: 76px;
+      background: var(--orange);
+      margin-left: 8px;
+      animation: blink 1.06s steps(2) infinite;
+    }
+    @keyframes blink { 50% { opacity: 0; } }
+
+    /* Hold-to-pause feedback */
+    body.paused { cursor: grabbing; }
+    body.paused .cursor { animation-play-state: paused; }
+
+    /* Mode switching — only one wordmark visible at a time */
+    body.mode-play   #wordmark-canvas { display: none; }
+    body.mode-static #wordmark-html   { display: none; }
+
+    #wordmark-canvas canvas { display: block; }
+
+    /* Red guide frame — visible only in play mode, used as a screenshot reference */
+    body.mode-play #wordmark-html {
+      outline: 2px solid red;
+      outline-offset: 10px;
+    }
+
+    /* ===== Floating control bar ===== */
+    .controls {
+      position: fixed;
+      bottom: 28px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      gap: 4px;
+      padding: 5px;
+      background: rgba(255, 255, 255, 0.92);
+      backdrop-filter: blur(10px);
+      border: 1px solid #e5e7eb;
+      border-radius: 999px;
+      box-shadow: 0 4px 24px rgba(0, 0, 0, 0.06);
+      opacity: 0.45;
+      transition: opacity 0.25s ease;
+      font-family: 'JetBrains Mono', monospace;
+      z-index: 10;
+    }
+    .controls:hover { opacity: 1; }
+
+    .ctrl-btn {
+      padding: 8px 18px;
+      border: none;
+      background: transparent;
+      color: #374151;
+      font-family: inherit;
+      font-size: 11px;
+      letter-spacing: 1.8px;
+      text-transform: uppercase;
+      font-weight: 600;
+      border-radius: 999px;
+      cursor: pointer;
+      transition: background 0.18s, color 0.18s;
+    }
+    .ctrl-btn:hover { background: #f3f4f6; }
+    .ctrl-btn.active {
+      background: var(--blue);
+      color: white;
+    }
+
+    .hint {
+      position: fixed;
+      top: 20px;
+      right: 24px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 10px;
+      color: #9ca3af;
+      letter-spacing: 1.5px;
+      opacity: 0.6;
+      z-index: 10;
+    }
+    .hint kbd {
+      background: #f3f4f6;
+      border: 1px solid #e5e7eb;
+      border-radius: 4px;
+      padding: 1px 6px;
+      font-family: inherit;
+      font-size: 10px;
+      color: #4b5563;
+    }
+
+    body.capture .controls,
+    body.capture .hint { opacity: 0; pointer-events: none; }
+  </style>
+</head>
+<body class="mode-static">
+  <div class="wordmark-stage">
+    <div class="wordmark" id="wordmark-html"></div>
+    <div id="wordmark-canvas"></div>
+  </div>
+
+  <div class="hint">
+    <kbd>Space</kbd> play/freeze &nbsp; <kbd>R</kbd> reshuffle &nbsp; <kbd>Hold ⌖</kbd> pause &nbsp; <kbd>C</kbd> hide ui
+  </div>
+
+  <div class="controls">
+    <button class="ctrl-btn" id="btn-play">Play</button>
+    <button class="ctrl-btn active" id="btn-static">Static</button>
+    <button class="ctrl-btn" id="btn-capture">Capture</button>
+  </div>
+
+  <script>
+    // ===== Constants =====
+    const TARGET = 'CoReFusion';
+    const POOL   = 'abcdefghijklmnopqrstuvwxyz_';
+    const COLORS = {
+      blue:     '#0076C2',
+      blueSoft: '#0076C2',
+      orange:   '#FF8000',
+    };
+
+    const htmlEl   = document.getElementById('wordmark-html');
+    const canvasEl = document.getElementById('wordmark-canvas');
+
+    const sleep   = ms => new Promise(r => setTimeout(r, ms));
+    const randInt = (n, rng = Math.random) => Math.floor(rng() * n);
+    const pick    = (arr, rng = Math.random) => arr[randInt(arr.length, rng)];
+
+    function shuffled(n, rng = Math.random) {
+      const arr = [...Array(n).keys()];
+      for (let i = arr.length - 1; i > 0; i--) {
+        const j = randInt(i + 1, rng);
+        [arr[i], arr[j]] = [arr[j], arr[i]];
+      }
+      return arr;
+    }
+
+    // Mulberry32 — deterministic PRNG. Reseed at the start of each play cycle
+    // so every playback produces an identical random-char sequence + identical
+    // blue-resolution order.
+    function makePRNG(seed) {
+      return function() {
+        seed |= 0; seed = (seed + 0x6D2B79F5) | 0;
+        let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+        t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+      };
+    }
+
+    function colorForChar(i) {
+      if (i < 2)              return COLORS.blue;      // C o
+      if (i === 2 || i === 3) return COLORS.orange;    // R e
+      return COLORS.blueSoft;                          // F u s i o n
+    }
+    function classForChar(i) {
+      if (i < 2)              return 'co';
+      if (i === 2 || i === 3) return 're';
+      return 'fusion';
+    }
+
+    // =====================================================
+    //  STATIC MODE — Canvas with mosaic-diffusion effect
+    // =====================================================
+    let mosaicSeed = 1;  // bump to reshuffle the mosaic pattern
+
+    function showStaticMosaic() {
+      const FONT_SIZE = 96;           // px
+      const PAD       = 24;
+      const FONT      = `700 ${FONT_SIZE}px 'Pixelify Sans', ui-monospace, monospace`;
+
+      // Measure character width (monospace — all glyphs same width)
+      const measure = document.createElement('canvas').getContext('2d');
+      measure.font = FONT;
+      const rawW = measure.measureText('M').width;
+      const charW = Math.ceil(rawW * 0.95);   // slight tightening for visual density
+      const charH = Math.ceil(FONT_SIZE * 1.05);
+
+      const totalW = TARGET.length * charW + PAD * 2;
+      const totalH = charH + PAD * 2;
+
+      const dpr = Math.max(window.devicePixelRatio || 1, 2);
+      const canvas = document.createElement('canvas');
+      canvas.width  = totalW * dpr;
+      canvas.height = totalH * dpr;
+      canvas.style.width  = totalW + 'px';
+      canvas.style.height = totalH + 'px';
+      const ctx = canvas.getContext('2d');
+      ctx.scale(dpr, dpr);
+
+      for (let i = 0; i < TARGET.length; i++) {
+        drawCharMosaic(
+          ctx, TARGET[i],
+          PAD + i * charW, PAD,
+          FONT_SIZE, charW, charH,
+          colorForChar(i), i
+        );
+      }
+
+      canvasEl.innerHTML = '';
+      canvasEl.appendChild(canvas);
+    }
+
+    function drawCharMosaic(mainCtx, ch, dx, dy, fontSize, w, h, color, idx) {
+      const dpr = 2;  // internal supersampling for hi-res offscreen
+
+      // --- Hi-res offscreen: smooth glyph (pixel font) ---
+      const hi = document.createElement('canvas');
+      hi.width  = w * dpr;
+      hi.height = h * dpr;
+      const hiCtx = hi.getContext('2d');
+      hiCtx.scale(dpr, dpr);
+      hiCtx.font         = `700 ${fontSize}px 'Pixelify Sans', ui-monospace, monospace`;
+      hiCtx.fillStyle    = color;
+      hiCtx.textBaseline = 'middle';
+      hiCtx.textAlign    = 'center';
+      hiCtx.fillText(ch, w / 2, h / 2);
+
+      // --- Halo mask: blur(glyph) minus glyph itself ---
+      //   Produces a soft outward fade from the glyph outline. Sampling this
+      //   alpha at a particle's centre gives proximity-to-glyph: high near
+      //   the outline, fading to 0 as the particle drifts away.
+      const HALO_PAD = 32;
+      const HW = w + 2 * HALO_PAD;
+      const HH = h + 2 * HALO_PAD;
+      const halo = document.createElement('canvas');
+      halo.width  = HW;
+      halo.height = HH;
+      const haloCtx = halo.getContext('2d');
+      haloCtx.filter = `blur(${HALO_PAD * 0.5}px)`;
+      haloCtx.drawImage(hi, 0, 0, w * dpr, h * dpr, HALO_PAD, HALO_PAD, w, h);
+      haloCtx.filter = 'none';
+      haloCtx.globalCompositeOperation = 'destination-out';
+      haloCtx.drawImage(hi, 0, 0, w * dpr, h * dpr, HALO_PAD, HALO_PAD, w, h);
+      haloCtx.globalCompositeOperation = 'source-over';
+      const haloData = haloCtx.getImageData(0, 0, HW, HH);
+
+      const sampleHalo = (localX, localY) => {
+        const px = Math.floor(localX) + HALO_PAD;
+        const py = Math.floor(localY) + HALO_PAD;
+        if (px < 0 || px >= HW || py < 0 || py >= HH) return 0;
+        return haloData.data[(py * HW + px) * 4 + 3] / 255;
+      };
+
+      // --- Draw the smooth glyph onto main canvas (baseline) ---
+      mainCtx.imageSmoothingEnabled = true;
+      mainCtx.drawImage(hi, 0, 0, w * dpr, h * dpr, dx, dy, w, h);
+
+      // --- Scatter rounded-square particles AROUND the glyph ---
+      //   Particle count grows left → right (denoising wavefront).
+      //   Each particle's alpha = baseAlpha × halo(centre), so squares hugging
+      //   the outline stay opaque while drifting squares dissolve to nothing.
+      const posFactor = idx / (TARGET.length - 1);
+      const MIN_N     = 7;
+      const MAX_N     = 16;
+      const N         = Math.round(MIN_N + (MAX_N - MIN_N) * posFactor);
+
+      for (let i = 0; i < N; i++) {
+        const sq = sampleSquare(idx, i, w, h, HALO_PAD);
+        const cx = sq.x + sq.size / 2;
+        const cy = sq.y + sq.size / 2;
+        const haloFactor = sampleHalo(cx, cy);
+        if (haloFactor < 0.04) continue;   // too far from glyph → invisible, skip
+
+        mainCtx.globalAlpha = Math.min(1, sq.alphaBase * haloFactor);
+        mainCtx.fillStyle   = sq.color;
+        mainCtx.beginPath();
+        mainCtx.roundRect(dx + sq.x, dy + sq.y, sq.size, sq.size, sq.radius);
+        mainCtx.fill();
+      }
+      mainCtx.globalAlpha = 1;
+    }
+
+    // Deterministic pseudo-random rounded-square per (charIdx, i, seed).
+    // Positions span the char box ± halo padding, so most particles land in
+    // the halo ring around the outline. The halo mask multiplier dims any
+    // square that drifts too far from the glyph.
+    function sampleSquare(charIdx, i, w, h, pad) {
+      const rnd = (axis) => {
+        const x = Math.sin(charIdx * 73.4 + i * 17.1 + axis * 31.5 + mosaicSeed * 191.7) * 10000;
+        return x - Math.floor(x);
+      };
+      const size = 6 + rnd(1) * 14;                              // 6 → 20 px
+      return {
+        size,
+        x:      -pad + rnd(2) * (w + 2 * pad) - size / 2,        // ± pad outside box
+        y:      -pad + rnd(3) * (h + 2 * pad) - size / 2,
+        color:  rnd(4) > 0.5 ? COLORS.blue : COLORS.orange,
+        alphaBase: 0.70 + rnd(5) * 0.30,                         // 0.70 → 1.00 (halo dims further)
+        radius: 1.5 + rnd(6) * 2.5,                              // 1.5 → 4 px
+      };
+    }
+
+    // =====================================================
+    //  PLAY MODE — HTML chars with diffusion cycling
+    // =====================================================
+    function renderHTMLWordmark(states, showCursor) {
+      const html = states.map((s, i) => {
+        const cls = s.resolved ? classForChar(i) : (s.trans ? 'trans' : 'mask');
+        const ch  = s.resolved ? TARGET[i]       : (s.trans ? s.tempChar : '█');
+        return `<span class="char ${cls}">${ch}</span>`;
+      }).join('') + (showCursor ? '<span class="cursor"></span>' : '');
+      htmlEl.innerHTML = html;
+    }
+
+    const PLAY_SEED = 42;   // change to vary the canonical "performance"
+
+    async function runDiffusionAnim(id) {
+      // Fresh seeded PRNG at the start of every cycle → identical playback
+      // (same cycling chars, same blue-resolution order) on every replay.
+      const rng = makePRNG(PLAY_SEED);
+
+      const states = TARGET.split('').map(() => ({
+        resolved: false, trans: false, tempChar: '█',
+      }));
+
+      // ===== Phase 0: hold on grey blocks =====
+      renderHTMLWordmark(states, true);
+      await sleep(520);
+      if (id !== animId) return;
+
+      // Resolution order: shuffled blues first, then R, e last (deterministic)
+      const blueIdx = [], orangeIdx = [];
+      for (let i = 0; i < TARGET.length; i++) {
+        const cls = classForChar(i);
+        if (cls === 'co' || cls === 'fusion') blueIdx.push(i);
+        else if (cls === 're')                 orangeIdx.push(i);
+      }
+      const blueOrder = shuffled(blueIdx.length, rng).map(k => blueIdx[k]);
+
+      // ===== Phase 1: cycle random, resolve blues straight into blue =====
+      const STEPS = 22;
+      for (let step = 0; step < STEPS; step++) {
+        if (id !== animId) return;
+        while (isPaused && id === animId) await sleep(60);
+        if (id !== animId) return;
+        const progress = step / (STEPS - 1);
+
+        for (let i = 0; i < TARGET.length; i++) {
+          if (!states[i].resolved) {
+            if (rng() < 0.3 + progress * 0.55) {
+              states[i].trans = true;
+              states[i].tempChar = pick(POOL, rng);
+            } else {
+              states[i].trans = false;
+            }
+          }
+        }
+
+        const target = Math.floor(progress * blueOrder.length * 1.05);
+        for (let k = 0; k < Math.min(target, blueOrder.length); k++) {
+          states[blueOrder[k]].resolved = true;
+        }
+        renderHTMLWordmark(states, true);
+        await sleep(110);
+      }
+      for (let k = 0; k < blueOrder.length; k++) states[blueOrder[k]].resolved = true;
+      renderHTMLWordmark(states, true);
+
+      // ===== Phase 1.5: dramatic hold — R/e still cycling in grey =====
+      for (let beat = 0; beat < 4; beat++) {
+        if (id !== animId) return;
+        while (isPaused && id === animId) await sleep(60);
+        if (id !== animId) return;
+        for (let i = 0; i < TARGET.length; i++) {
+          if (!states[i].resolved) {
+            states[i].trans = true;
+            states[i].tempChar = pick(POOL, rng);
+          }
+        }
+        renderHTMLWordmark(states, true);
+        await sleep(140);
+      }
+
+      // ===== Phase 2: R then e snap from random straight into orange =====
+      for (let k = 0; k < orangeIdx.length; k++) {
+        if (id !== animId) return;
+        while (isPaused && id === animId) await sleep(60);
+        if (id !== animId) return;
+        states[orangeIdx[k]].resolved = true;
+        renderHTMLWordmark(states, true);
+        await sleep(260);
+      }
+    }
+
+    // =====================================================
+    //  Mode controller
+    // =====================================================
+    let mode     = 'static';
+    let animId   = 0;
+    let isPaused = false;   // true while user holds the mouse — freezes play-mode animation
+
+    function setMode(next) {
+      mode = next;
+      animId++;
+      document.body.classList.remove('mode-play', 'mode-static');
+      document.body.classList.add('mode-' + next);
+      document.getElementById('btn-play').classList.toggle('active',   next === 'play');
+      document.getElementById('btn-static').classList.toggle('active', next === 'static');
+
+      if (next === 'static') {
+        showStaticMosaic();
+      } else if (next === 'play') {
+        runPlayLoop(animId);
+      }
+    }
+
+    async function runPlayLoop(id) {
+      while (mode === 'play' && id === animId) {
+        await runDiffusionAnim(id);
+        if (mode !== 'play' || id !== animId) break;
+        // Hold phase — split into small chunks so isPaused is honoured here too.
+        let elapsed = 0;
+        while (elapsed < 2800 && mode === 'play' && id === animId) {
+          while (isPaused && id === animId) await sleep(60);
+          if (mode !== 'play' || id !== animId) break;
+          await sleep(100);
+          elapsed += 100;
+        }
+      }
+    }
+
+    function reshuffleStatic() {
+      mosaicSeed = (mosaicSeed + 1) % 1000;
+      if (mode === 'static') showStaticMosaic();
+    }
+
+    // ===== Buttons =====
+    document.getElementById('btn-play').addEventListener('click',   () => setMode('play'));
+    document.getElementById('btn-static').addEventListener('click', () => setMode('static'));
+    document.getElementById('btn-capture').addEventListener('click', () => {
+      document.body.classList.toggle('capture');
+    });
+
+    // ===== Mouse: hold left button to freeze play-mode animation =====
+    document.addEventListener('mousedown', (e) => {
+      if (e.button !== 0) return;
+      if (e.target.closest('.controls, .hint')) return;   // ignore UI clicks
+      if (mode !== 'play') return;
+      isPaused = true;
+      document.body.classList.add('paused');
+    });
+    const releasePause = () => {
+      if (!isPaused) return;
+      isPaused = false;
+      document.body.classList.remove('paused');
+    };
+    window.addEventListener('mouseup',    releasePause);
+    window.addEventListener('mouseleave', releasePause);
+    window.addEventListener('blur',       releasePause);
+
+    // ===== Keyboard =====
+    document.addEventListener('keydown', (e) => {
+      if (e.code === 'Space') {
+        e.preventDefault();
+        setMode(mode === 'play' ? 'static' : 'play');
+      } else if (e.code === 'KeyS') {
+        setMode('static');
+      } else if (e.code === 'KeyP') {
+        setMode('play');
+      } else if (e.code === 'KeyR') {
+        reshuffleStatic();
+      } else if (e.code === 'KeyC' || e.code === 'Escape') {
+        document.body.classList.toggle('capture');
+      }
+    });
+
+    // ===== Init: wait for the web font to load, then render =====
+    if (document.fonts && document.fonts.ready) {
+      document.fonts.ready.then(() => showStaticMosaic());
+    } else {
+      setTimeout(showStaticMosaic, 200);
+    }
+  </script>
+</body>
+</html>

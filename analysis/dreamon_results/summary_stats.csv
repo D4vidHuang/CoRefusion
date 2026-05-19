@@ -1,0 +1,11 @@
+metric,value,n
+site_level_em,0.1460,7712
+sample_majority_em,0.1600,1000
+sample_any_em,0.2430,1000
+old_first_mask_em,0.1640,1000
+avg_masks_per_sample,7.71,1000
+median_masks_per_sample,4,1000
+avg_windows_per_sample,1.72,1000
+total_forward_passes,1719,1000
+recoverable_gap_any_vs_majority,0.0830,1000
+mean_self_consistency,0.8002,1000

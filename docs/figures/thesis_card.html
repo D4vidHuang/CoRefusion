@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>CoReFusion · Thesis Card</title>
+  <style>
+    * { box-sizing: border-box; }
+
+    html, body {
+      margin: 0;
+      padding: 0;
+      height: 100vh;
+      overflow: hidden;
+    }
+
+    body {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #ffffff;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    /* Perspective container — gives the stage real 3D depth. */
+    .scene {
+      perspective: 1600px;
+      perspective-origin: 50% 45%;
+    }
+
+    /* The stage holds the combined tilt:
+         · rotateZ(-18deg)  → mild upward-right slant
+         · rotateX( 42deg)  → top edge recedes into the distance  */
+    .stage {
+      transform: rotateX(42deg) rotateZ(-18deg);
+      transform-style: preserve-3d;
+      transform-origin: center center;
+    }
+
+    .window {
+      width: 720px;
+      background: linear-gradient(180deg, #ffffff 0%, #fafbfd 100%);
+      border-radius: 12px;
+      overflow: hidden;
+      box-shadow:
+        0  0   0   1px rgba(0, 0, 0, 0.10),           /* hairline edge — keeps the window visible against pure white */
+        0  6px  14px  rgba(0, 0, 0, 0.10),            /* near contact shadow */
+        0 30px  60px  rgba(0, 0, 0, 0.18),            /* mid receding shadow */
+        0 90px 160px  rgba(0, 0, 0, 0.15);            /* far ground shadow   */
+    }
+
+    /* macOS-style light title bar */
+    .titlebar {
+      position: relative;
+      height: 32px;
+      background: linear-gradient(180deg, #ececf0 0%, #d8d8dc 100%);
+      display: flex;
+      align-items: center;
+      padding: 0 14px;
+      border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+    }
+
+    .dots { display: flex; gap: 8px; }
+    .dot {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      box-shadow: inset 0 0 0 0.5px rgba(0, 0, 0, 0.15);
+    }
+    .dot.red    { background: #ff5f57; }
+    .dot.yellow { background: #febc2e; }
+    .dot.green  { background: #28c840; }
+
+    .tab {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      transform: translate(-50%, -50%);
+      color: #4a4a55;
+      font-size: 12.5px;
+      font-family: 'SF Mono', 'Menlo', monospace;
+      letter-spacing: 0.2px;
+    }
+
+    pre.code {
+      margin: 0;
+      padding: 28px 30px 30px;
+      font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', Menlo, monospace;
+      font-size: 18px;
+      line-height: 1.75;
+      color: #1f2328;
+      tab-size: 4;
+    }
+
+    /* Syntax colors — Xcode / GitHub-light inspired */
+    .k { color: #ad3da4; }   /* keywords   - magenta */
+    .t { color: #267f99; }   /* types      - teal    */
+    .c { color: #0070c1; }   /* constants  - blue    */
+    .s { color: #c41a16; }   /* strings    - red     */
+    .m { color: #5d3a9b; }   /* methods    - purple  */
+    .v { color: #1f2328; }   /* variables  - ink     */
+  </style>
+</head>
+<body>
+  <div class="scene">
+    <div class="stage">
+      <div class="window">
+        <div class="titlebar">
+          <div class="dots">
+            <div class="dot red"></div>
+            <div class="dot yellow"></div>
+            <div class="dot green"></div>
+          </div>
+          <div class="tab">CoReFusion.java</div>
+        </div>
+<pre class="code"><span class="k">public class</span> <span class="t">CoReFusion</span> <span class="k">extends</span> <span class="t">MScThesis</span> {
+
+    <span class="k">static final</span> <span class="t">String</span> <span class="c">SUBTITLE</span> = <span class="s">"Is Refactoring Denoising?"</span>;
+    <span class="k">static final</span> <span class="t">String</span> <span class="c">AUTHOR</span> = <span class="s">"Yongcheng Huang"</span>;
+    <span class="k">static final</span> <span class="t">String</span> <span class="c">Program</span> = <span class="s">"DSAIT MSc"</span>;
+
+    <span class="t">Code</span> <span class="m">refactor</span>(<span class="t">Code</span> <span class="v">c</span>) {
+        <span class="k">return</span> <span class="v">dLLM</span>.<span class="m">denoise</span>(<span class="v">c</span>);
+    }
+
+    <span class="k">public static</span> <span class="t">void</span> <span class="m">main</span>(<span class="t">String</span>[] <span class="v">args</span>) {
+        <span class="t">System</span>.<span class="v">out</span>.<span class="m">println</span>(<span class="s">"Filling  &ne;  Finding."</span>);
+    }
+}</pre>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

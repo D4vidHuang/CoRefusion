@@ -1,0 +1,3 @@
+setting,file,n,first_mask_em,strict_all_sites_em,majority_vote_em,any_site_em,notes
+DreamOn-7B (NEW: tiled all-site coverage),DreamOn-7B_per_sample_20260509_134411.csv,1000,0.1540,0.0910,0.1600,0.2430,baseline-equivalent scoring: first prediction in pipe-separated predictions column vs ground_truth
+DreamOn-7B (OLD: single-window first-mask),DreamOn-7B_refineID_20260509_113722.csv,1000,0.1640,,,, per-site preds not stored so strict EM N/A
