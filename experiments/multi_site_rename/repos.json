@@ -1,0 +1,125 @@
+{
+  "_comment": "Curated, well-known open-source Java files pinned to release tags for reproducibility. build_dataset.py fetches each via raw.githubusercontent.com and gracefully skips any that 404 or fail to parse. Edit freely; 'name' must be unique.",
+  "files": [
+    {
+      "name": "guava-Strings",
+      "repo": "google/guava",
+      "ref": "v33.4.0",
+      "path": "guava/src/com/google/common/base/Strings.java"
+    },
+    {
+      "name": "guava-Joiner",
+      "repo": "google/guava",
+      "ref": "v33.4.0",
+      "path": "guava/src/com/google/common/base/Joiner.java"
+    },
+    {
+      "name": "guava-Preconditions",
+      "repo": "google/guava",
+      "ref": "v33.4.0",
+      "path": "guava/src/com/google/common/base/Preconditions.java"
+    },
+    {
+      "name": "spring-StringUtils",
+      "repo": "spring-projects/spring-framework",
+      "ref": "v6.1.5",
+      "path": "spring-core/src/main/java/org/springframework/util/StringUtils.java"
+    },
+    {
+      "name": "spring-CollectionUtils",
+      "repo": "spring-projects/spring-framework",
+      "ref": "v6.1.5",
+      "path": "spring-core/src/main/java/org/springframework/util/CollectionUtils.java"
+    },
+    {
+      "name": "spring-NumberUtils",
+      "repo": "spring-projects/spring-framework",
+      "ref": "v6.1.5",
+      "path": "spring-core/src/main/java/org/springframework/util/NumberUtils.java"
+    },
+    {
+      "name": "commons-lang-NumberUtils",
+      "repo": "apache/commons-lang",
+      "ref": "rel/commons-lang-3.14.0",
+      "path": "src/main/java/org/apache/commons/lang3/math/NumberUtils.java"
+    },
+    {
+      "name": "commons-lang-ArrayUtils",
+      "repo": "apache/commons-lang",
+      "ref": "rel/commons-lang-3.14.0",
+      "path": "src/main/java/org/apache/commons/lang3/ArrayUtils.java"
+    },
+    {
+      "name": "commons-io-FilenameUtils",
+      "repo": "apache/commons-io",
+      "ref": "rel/commons-io-2.15.1",
+      "path": "src/main/java/org/apache/commons/io/FilenameUtils.java"
+    },
+    {
+      "name": "commons-io-IOUtils",
+      "repo": "apache/commons-io",
+      "ref": "rel/commons-io-2.15.1",
+      "path": "src/main/java/org/apache/commons/io/IOUtils.java"
+    },
+    {
+      "name": "netty-StringUtil",
+      "repo": "netty/netty",
+      "ref": "netty-4.1.107.Final",
+      "path": "common/src/main/java/io/netty/util/internal/StringUtil.java"
+    },
+    {
+      "name": "netty-MathUtil",
+      "repo": "netty/netty",
+      "ref": "netty-4.1.107.Final",
+      "path": "common/src/main/java/io/netty/util/internal/MathUtil.java"
+    },
+    {
+      "name": "dubbo-URLStrParser",
+      "repo": "apache/dubbo",
+      "ref": "dubbo-3.2.10",
+      "path": "dubbo-common/src/main/java/org/apache/dubbo/common/URLStrParser.java"
+    },
+    {
+      "name": "dubbo-StringUtils",
+      "repo": "apache/dubbo",
+      "ref": "dubbo-3.2.10",
+      "path": "dubbo-common/src/main/java/org/apache/dubbo/common/utils/StringUtils.java"
+    },
+    {
+      "name": "gson-JsonReader",
+      "repo": "google/gson",
+      "ref": "gson-parent-2.10.1",
+      "path": "gson/src/main/java/com/google/gson/stream/JsonReader.java"
+    },
+    {
+      "name": "gson-LinkedTreeMap",
+      "repo": "google/gson",
+      "ref": "gson-parent-2.10.1",
+      "path": "gson/src/main/java/com/google/gson/internal/LinkedTreeMap.java"
+    },
+    {
+      "name": "jackson-TextBuffer",
+      "repo": "FasterXML/jackson-core",
+      "ref": "jackson-core-2.16.1",
+      "path": "src/main/java/com/fasterxml/jackson/core/util/TextBuffer.java"
+    },
+    {
+      "name": "rxjava-ObservableFlatMap",
+      "repo": "ReactiveX/RxJava",
+      "ref": "v3.1.8",
+      "path": "src/main/java/io/reactivex/rxjava3/internal/operators/observable/ObservableFlatMap.java"
+    },
+    {
+      "name": "fastjson-IOUtils",
+      "repo": "alibaba/fastjson",
+      "ref": "1.2.83",
+      "path": "src/main/java/com/alibaba/fastjson/util/IOUtils.java"
+    },
+    {
+      "name": "guava-CharMatcher",
+      "repo": "google/guava",
+      "ref": "v33.4.0",
+      "path": "guava/src/com/google/common/base/CharMatcher.java"
+    }
+  ]
+}

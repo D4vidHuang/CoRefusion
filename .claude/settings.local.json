@@ -9,7 +9,8 @@
       "Bash(python:*)",
       "Bash(ls -la /Users/davidhuang/Desktop/CoRefusion/experiments/refine_id_benchmark)",
       "Read(//tmp/**)",
-      "Bash(ls -la /Users/davidhuang/Desktop/CoRefusion/experiments/refine_id_benchmark 2>&1 > /tmp/ls3.txt; wc -l /tmp/ls3.txt; head /tmp/ls3.txt)"
+      "Bash(ls -la /Users/davidhuang/Desktop/CoRefusion/experiments/refine_id_benchmark 2>&1 > /tmp/ls3.txt; wc -l /tmp/ls3.txt; head /tmp/ls3.txt)",
+      "Bash(/bin/ls -la /Users/davidhuang/Desktop/CoRefusion/data/)"
     ]
   }
 }
