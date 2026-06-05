@@ -1,0 +1,1176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>CoReFusion · Defense Opening</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Pixelify+Sans:wght@500;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    /* ---- light IDE palette (Xcode / GitHub-light, matched to thesis_card) ---- */
+    --bg:        #ffffff;
+    --paper:     #fafbfd;
+    --ink:       #1f2328;
+    --muted:     #6e7781;
+    --line:      rgba(0,0,0,0.08);
+
+    --k:  #ad3da4;   /* keyword  - magenta */
+    --t:  #267f99;   /* type     - teal    */
+    --c:  #0070c1;   /* constant - blue    */
+    --s:  #c41a16;   /* string   - red     */
+    --m:  #5d3a9b;   /* method   - purple  */
+    --an: #6f8b1f;   /* annotation - olive */
+
+    /* ---- CoReFusion brand ---- */
+    --blue:   #0076C2;
+    --orange: #FF8000;
+
+    /* ---- diffusion phase colours (matched to thesis_card legend) ---- */
+    --mask-bg:   #f7c4c4;  --mask-fg:   #b23b3b;  --mask-sq:   #e88a8a;
+    --low-bg:    #fbe9b6;  --low-fg:    #8a6d1f;  --low-sq:    #f1d27a;
+    --high-bg:   #f4ad5a;  --high-fg:   #7a4310;  --high-sq:   #ef9a3c;
+    --commit-bg: #9bdcbb;  --commit-fg: #176a45;  --commit-sq: #4cb98a;
+    --idle-sq:   #c9ced6;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: var(--bg); }
+
+  body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    color: var(--ink);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* Fit wrapper — design space is 1280×800, scaled to fill any viewport. */
+  #fit {
+    position: absolute;
+    left: 50%; top: 50%;
+    width: 1280px; height: 800px;
+    transform-origin: center center;
+  }
+  #stage {
+    position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    background: var(--bg);
+    overflow: hidden;
+  }
+
+  /* ============================================================= *
+   *  LAYER 1 — TU Delft logo / filename                            *
+   * ============================================================= */
+  #logoLayer {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    gap: 6px;
+    opacity: 0;
+    transition: opacity 0.7s ease, transform 0.7s ease;
+  }
+
+  /* The wordmark group  (TUDelft → TUDelft.java) */
+  #brand {
+    display: flex; flex-direction: column; align-items: center;
+    transition: transform 0.85s cubic-bezier(.5,.05,.2,1), opacity 0.6s ease;
+    will-change: transform;
+  }
+  #wordmark {
+    font-family: 'Inter', Helvetica, Arial, sans-serif;
+    font-size: 112px;
+    line-height: 1;
+    color: #111417;
+    letter-spacing: -1px;
+    white-space: nowrap;
+    padding: 10px 22px;
+    border-radius: 16px;
+    transition: background 0.22s ease, opacity 0.5s ease;
+  }
+  #wordmark.selected { background: rgba(29,114,216,.13); }
+  /* every glyph animates in/out on its own — soft slide + blur */
+  .wm-ch {
+    display: inline-block;
+    opacity: 0;
+    transform: translateY(36px);
+    filter: blur(12px);
+    transition: opacity .55s ease, transform .66s cubic-bezier(.2,.75,.25,1), filter .55s ease;
+  }
+  .wm-ch.in  { opacity: 1; transform: translateY(0);    filter: blur(0); }
+  .wm-ch.out { opacity: 0; transform: translateY(-26px); filter: blur(10px); }
+  .wm-ch.tu    { font-weight: 800; }
+  .wm-ch.delft { font-weight: 400; }
+  .wm-ch.ext   { font-weight: 500; color: var(--orange); }
+  .wm-ext { display: inline-block; }     /* reserves ".java" width → TUDelft stays centred */
+
+  /* the macOS pointer cursor */
+  #pointer {
+    position: absolute;
+    width: 30px; height: 30px;
+    left: 0; top: 0;
+    opacity: 0;
+    pointer-events: none;
+    z-index: 50;
+    filter: drop-shadow(0 1px 1.5px rgba(0,0,0,.35));
+    transition: opacity 0.4s ease;
+    will-change: transform;
+  }
+
+  /* click ripple */
+  #ripple {
+    position: absolute;
+    width: 18px; height: 18px; border-radius: 50%;
+    border: 2px solid rgba(29,114,216,.7);
+    opacity: 0; transform: scale(.2);
+    pointer-events: none; z-index: 49;
+  }
+  #ripple.go { animation: ripple .45s ease-out; }
+  @keyframes ripple {
+    0%   { opacity: .9; transform: scale(.2); }
+    100% { opacity: 0;  transform: scale(2.6); }
+  }
+
+  /* ============================================================= *
+   *  LAYER 2 — macOS IDE window                                    *
+   * ============================================================= */
+  #ideLayer {
+    position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    opacity: 0;
+    transform: scale(.18);
+    transform-origin: center center;
+    pointer-events: none;
+  }
+
+  .window {
+    position: relative;
+    width: 1160px;
+    background: linear-gradient(180deg, #ffffff 0%, #fafbfd 100%);
+    border-radius: 13px;
+    overflow: hidden;
+    box-shadow:
+      0  0   0   1px rgba(0,0,0,0.10),
+      0  8px 18px rgba(0,0,0,0.12),
+      0 34px 64px rgba(0,0,0,0.18),
+      0 90px 160px rgba(0,0,0,0.13);
+  }
+  .titlebar {
+    position: relative;
+    height: 40px;
+    background: linear-gradient(180deg, #ececf0 0%, #d9d9dd 100%);
+    display: flex; align-items: center;
+    padding: 0 16px;
+    border-bottom: 1px solid var(--line);
+  }
+  .dots { display: flex; gap: 9px; }
+  .dot { width: 13px; height: 13px; border-radius: 50%;
+         box-shadow: inset 0 0 0 .5px rgba(0,0,0,.15); }
+  .dot.red    { background: #ff5f57; }
+  .dot.yellow { background: #febc2e; }
+  .dot.green  { background: #28c840; }
+  .tab {
+    position: absolute; left: 50%; top: 50%;
+    transform: translate(-50%,-50%);
+    color: #4a4a55; font-size: 14px;
+    font-family: 'JetBrains Mono', Menlo, monospace;
+    letter-spacing: .2px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .tab .javadot { width: 9px; height: 11px; border-radius: 2px;
+                  background: linear-gradient(180deg,#ff8a3d,#e35d2b); display:inline-block; }
+
+  .editorwrap { display: flex; }
+
+  /* line-numbered code editor */
+  .editor {
+    flex: 1;
+    display: flex;
+    padding: 24px 0 28px 0;
+    font-family: 'JetBrains Mono', 'Fira Code', Menlo, monospace;
+    font-size: 16px;
+    line-height: 1.95;
+    min-height: 470px;
+  }
+  .gutter {
+    width: 52px; flex: none;
+    text-align: right;
+    color: #b9bfc9;
+    user-select: none;
+    padding-right: 16px;
+    font-size: 13px;
+    padding-top: 1px;
+  }
+  .gutter div { line-height: 1.95; }
+  .codecol { flex: 1; padding-right: 26px; white-space: pre; color: var(--ink); }
+  .codecol .ln { display: block; min-height: 1.95em; }
+
+  /* token colours inside editor */
+  .k  { color: var(--k); }
+  .t  { color: var(--t); }
+  .c  { color: var(--c); }
+  .s  { color: var(--s); }
+  .mt { color: var(--m); }
+  .an { color: var(--an); }
+  .cm { color: var(--muted); font-style: italic; }
+
+  /* a diffusion "site" (token under denoising) */
+  .site {
+    border-radius: 5px;
+    padding: 1px 5px;
+    margin: 0 -1px;
+    transition: background .18s ease, color .18s ease, box-shadow .18s ease;
+  }
+  .site.ph-ink    { background: transparent; }
+  .site.ph-mask   { background: var(--mask-bg);   color: var(--mask-fg); }
+  .site.ph-low    { background: var(--low-bg);    color: var(--low-fg); }
+  .site.ph-high   { background: var(--high-bg);   color: var(--high-fg); }
+  .site.ph-commit { background: var(--commit-bg); color: var(--commit-fg); }
+  .site.flash     { animation: siteflash .65s ease-out; }
+  @keyframes siteflash {
+    0%   { box-shadow: 0 0 0 0   rgba(76,185,138,.0); }
+    35%  { box-shadow: 0 0 0 4px rgba(76,185,138,.55); }
+    100% { box-shadow: 0 0 0 0   rgba(76,185,138,.0); }
+  }
+
+  /* right-hand "site state" panel */
+  .panel {
+    width: 320px; flex: none;
+    border-left: 1px solid var(--line);
+    background: #fcfcfe;
+    padding: 22px 22px 22px 24px;
+    display: flex; flex-direction: column;
+  }
+  .panel .phead {
+    display: flex; justify-content: space-between; align-items: baseline;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px; color: var(--muted);
+    font-style: italic;
+    margin-bottom: 4px;
+  }
+  .panel .phead .p { font-style: italic; }
+
+  /* diffusion step readout + progress bar */
+  .stepbox {
+    margin: 6px 0 16px 0;
+    padding-bottom: 14px;
+    border-bottom: 1px dashed var(--line);
+  }
+  .stepbox .tlabel {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 14px; color: var(--ink);
+    display: flex; justify-content: space-between; align-items: baseline;
+  }
+  .stepbox .tlabel b { color: var(--blue); font-weight: 700; }
+  .bar {
+    margin-top: 9px; height: 7px; border-radius: 4px;
+    background: #e9ecf1; overflow: hidden;
+  }
+  .bar > i {
+    display: block; height: 100%; width: 0%;
+    background: linear-gradient(90deg, var(--mask-sq), var(--low-sq), var(--high-sq), var(--commit-sq));
+    border-radius: 4px;
+    transition: width .12s linear;
+  }
+
+  .srow {
+    display: flex; align-items: center; gap: 11px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 15px;
+    padding: 5px 0;
+  }
+  .srow .sq {
+    width: 13px; height: 13px; border-radius: 3px; flex: none;
+    background: var(--idle-sq);
+    transition: background .2s ease;
+  }
+  .srow .name { color: #3a3f47; flex: 1; }
+  .srow .pv   { color: var(--muted); font-variant-numeric: tabular-nums; min-width: 42px; text-align: right; }
+  .srow.is-mask   .sq { background: var(--mask-sq); }
+  .srow.is-low    .sq { background: var(--low-sq); }
+  .srow.is-high   .sq { background: var(--high-sq); }
+  .srow.is-commit .sq { background: var(--commit-sq); }
+  .srow.is-commit .name { color: var(--commit-fg); }
+  .srow.rowflash { animation: rowflash .65s ease-out; border-radius: 6px; }
+  @keyframes rowflash {
+    0%   { background: rgba(76,185,138,.0); }
+    35%  { background: rgba(76,185,138,.20); }
+    100% { background: rgba(76,185,138,.0); }
+  }
+
+  /* a little log toast above the editor inside the window */
+  .logline {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13.5px;
+    color: var(--muted);
+    padding: 7px 18px;
+    border-bottom: 1px solid var(--line);
+    background: #f6f7f9;
+    height: 0; opacity: 0; overflow: hidden;
+    transition: height .3s ease, opacity .3s ease;
+    white-space: nowrap;
+  }
+  .logline.show { height: 32px; opacity: 1; }
+  .logline .ok { color: #176a45; }
+  .logline .run { color: var(--blue); }
+
+  /* ============================================================= *
+   *  diffusion-start indicator + abstract dLLM viz                 *
+   * ============================================================= */
+  @keyframes spin { to { transform: rotate(360deg); } }
+  /* the log strip turns into an integrated "Diffusion" status bar */
+  .logline.diffusing {
+    background: linear-gradient(180deg,#eef4fb,#e4eef8);
+    color: #1f2328; font-weight: 600;
+    box-shadow: inset 0 -2px 0 rgba(0,118,194,.35);
+    display: flex; align-items: center;
+  }
+  .logline .lspin {
+    display: inline-block; width: 13px; height: 13px; border-radius: 50%;
+    border: 2.5px solid #cdd9e6; border-top-color: var(--blue);
+    margin-right: 10px; vertical-align: middle;
+    animation: spin .85s linear infinite;
+  }
+  .logline .dlabel { color: var(--blue); font-weight: 700; letter-spacing: .4px; }
+  .logline .dstep  { color: #6e7781; font-weight: 500; }
+
+  /* denoising wavefront sweeping across the editor */
+  #wavefront {
+    position: absolute; left: 0; top: 40px; bottom: 0; width: 200px; z-index: 18;
+    background: linear-gradient(90deg, transparent, rgba(0,118,194,.10) 35%, rgba(0,118,194,.22) 55%, transparent);
+    opacity: 0; pointer-events: none;
+  }
+  #wavefront.sweep { animation: wavesweep 1.15s ease-in-out; }
+  @keyframes wavesweep {
+    0%   { opacity: 0; transform: translateX(-220px); }
+    18%  { opacity: 1; } 82% { opacity: 1; }
+    100% { opacity: 0; transform: translateX(1200px); }
+  }
+
+  /* live "diffusing" pulse dot in the panel header */
+  .diffdot { display:inline-block; width:8px; height:8px; border-radius:50%;
+    background: var(--blue); margin-right:7px; vertical-align: middle;
+    opacity:0; transition: opacity .3s ease; }
+  .diffdot.on { opacity:1; animation: pulse 1.05s ease-in-out infinite; }
+  @keyframes pulse { 0%,100%{ transform:scale(.65); opacity:.45;} 50%{ transform:scale(1.15); opacity:1;} }
+
+  /* the abstract internals viz lives below the site-state rows */
+  #vizwrap { margin-top: 15px; opacity: .32; transition: opacity .5s ease; }
+  #vizwrap.active { opacity: 1; }
+  .vsep { border-top: 1px dashed var(--line); margin-bottom: 12px; }
+  .vhead { font-family:'JetBrains Mono',monospace; font-size:12px; font-style:italic;
+    color: var(--muted); margin-bottom: 9px; display:flex; justify-content:space-between; }
+  .vhead .vtok { font-style:normal; color:#5a6470; }
+
+  /* vocabulary confidence rank */
+  .vrank { position: relative; height: 118px; }
+  .vrow {
+    position:absolute; left:0; right:0; height:23px;
+    display:flex; align-items:center; gap:8px;
+    font-family:'JetBrains Mono',monospace; font-size:12.5px;
+    transition: transform .42s cubic-bezier(.3,.8,.3,1);
+  }
+  .vrow .vlabel { width:94px; color:#454b54; white-space:nowrap; }
+  .vrow .vbarwrap { flex:1; height:9px; background:#eef1f5; border-radius:5px; overflow:hidden; }
+  .vrow .vbar { height:100%; width:0%; border-radius:5px; background: var(--low-sq);
+    transition: width .4s ease, background .4s ease; }
+  .vrow .vp { width:34px; text-align:right; color:var(--muted); font-variant-numeric:tabular-nums; }
+  .vrow.win .vlabel { color: var(--commit-fg); font-weight:700; }
+  .vrow.win .vbar { background: linear-gradient(90deg, var(--high-sq), var(--commit-sq)); }
+
+  /* per-position edit signal */
+  .esig { display:flex; align-items:flex-end; gap:4px; height:56px; padding-top:6px; }
+  .ebar { flex:1; min-width:5px; height:8%;
+    background: var(--low-sq); border-radius:2px 2px 0 0;
+    transition: height .35s cubic-bezier(.3,.8,.3,1), background .35s ease; }
+  .ebar.masked    { background: var(--mask-sq); }
+  .ebar.active    { background: var(--high-sq); }
+  .ebar.committed { background: var(--commit-sq); }
+
+  /* ============================================================= *
+   *  LAYER 3 — CoReFusion wordmark (final)                         *
+   * ============================================================= */
+  #markLayer {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    gap: 26px;
+    opacity: 0;
+    pointer-events: none;
+  }
+  .cmark {
+    font-family: 'Pixelify Sans', 'JetBrains Mono', monospace;
+    font-size: 122px; font-weight: 700; line-height: 1;
+    display: flex; align-items: center;
+  }
+  .cchar { display: inline-block; width: .7em; text-align: center; transition: color .15s ease; }
+  .cchar.co     { color: var(--blue); }
+  .cchar.re     { color: var(--orange); }
+  .cchar.fusion { color: var(--blue); }
+  .cchar.mask   { color: #eef1f5; }
+  .cchar.trans  { color: #c8cfdb; }
+  .ccursor {
+    display: inline-block; width: 6px; height: 92px;
+    background: var(--orange); margin-left: 10px;
+    animation: blink 1.06s steps(2) infinite;
+  }
+  @keyframes blink { 50% { opacity: 0; } }
+  #subtitle {
+    text-align: center;
+    opacity: 0; transition: opacity .8s ease;
+  }
+  #subtitle .sub-title {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 22px; color: #3a4047; letter-spacing: .3px; font-weight: 600;
+  }
+  #subtitle .sub-meta {
+    margin-top: 12px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 14.5px; color: #8a9098; letter-spacing: 1px; font-weight: 500;
+  }
+  #subtitle .arrow { color: var(--orange); font-weight: 700; }
+
+  /* ============================================================= *
+   *  controls                                                      *
+   * ============================================================= */
+  .controls {
+    position: fixed; bottom: 24px; left: 50%;
+    transform: translateX(-50%);
+    display: flex; gap: 4px; padding: 5px;
+    background: rgba(255,255,255,.92);
+    backdrop-filter: blur(10px);
+    border: 1px solid #e5e7eb;
+    border-radius: 999px;
+    box-shadow: 0 4px 24px rgba(0,0,0,.06);
+    opacity: .4; transition: opacity .25s ease;
+    z-index: 100;
+  }
+  .controls:hover { opacity: 1; }
+  .ctrl-btn {
+    padding: 8px 18px; border: none; background: transparent;
+    color: #374151; font-family: 'JetBrains Mono', monospace;
+    font-size: 11px; letter-spacing: 1.8px; text-transform: uppercase;
+    font-weight: 600; border-radius: 999px; cursor: pointer;
+    transition: background .18s, color .18s;
+  }
+  .ctrl-btn:hover { background: #f3f4f6; }
+  .ctrl-btn.active { background: var(--blue); color: #fff; }
+  .hint {
+    position: fixed; top: 18px; right: 22px;
+    font-family: 'JetBrains Mono', monospace; font-size: 10px;
+    color: #9ca3af; letter-spacing: 1.4px; opacity: .55; z-index: 100;
+  }
+  .hint kbd { background: #f3f4f6; border: 1px solid #e5e7eb; border-radius: 4px;
+              padding: 1px 6px; color: #4b5563; }
+  body.capture .controls, body.capture .hint { display: none !important; }
+</style>
+</head>
+<body>
+<div id="fit">
+  <div id="stage">
+
+    <!-- ===== LAYER 1 : TU Delft logo → filename ===== -->
+    <div id="logoLayer">
+      <div id="brand">
+        <div id="wordmark"></div>
+      </div>
+    </div>
+
+    <!-- click affordances -->
+    <div id="ripple"></div>
+    <svg id="pointer" viewBox="0 0 24 24">
+      <path d="M5 2 L5 20 L10 15 L13 22 L16 21 L13 14 L20 14 Z"
+            fill="#fff" stroke="#1b1d20" stroke-width="1.4" stroke-linejoin="round"/>
+    </svg>
+
+    <!-- ===== LAYER 2 : macOS IDE window ===== -->
+    <div id="ideLayer">
+      <div class="window" id="ideWindow">
+        <div class="titlebar">
+          <div class="dots"><div class="dot red"></div><div class="dot yellow"></div><div class="dot green"></div></div>
+          <div class="tab"><span class="javadot"></span><span id="ideTab">TUDelft.java</span></div>
+        </div>
+        <div class="logline" id="logLine"></div>
+        <div class="editorwrap">
+          <div class="editor">
+            <div class="gutter" id="gutter"></div>
+            <div class="codecol" id="codecol"></div>
+          </div>
+          <div class="panel">
+            <div class="phead"><span><span class="diffdot" id="diffDot"></span>site&nbsp;state</span><span class="p">p</span></div>
+            <div class="stepbox">
+              <div class="tlabel"><span>diffusion step</span><span><b id="tNow">t = 0</b> / 12</span></div>
+              <div class="bar"><i id="tBar"></i></div>
+            </div>
+            <div id="srows"></div>
+            <div id="vizwrap">
+              <div class="vsep"></div>
+              <div class="vhead"><span>vocab · confidence rank</span><span class="vtok" id="vtok">site: title</span></div>
+              <div class="vrank" id="vrank"></div>
+              <div class="vhead" style="margin-top:14px"><span>edit signal</span><span class="vtok">per&nbsp;position</span></div>
+              <div class="esig" id="esig"></div>
+            </div>
+          </div>
+        </div>
+        <div id="wavefront"></div>
+      </div>
+    </div>
+
+    <!-- ===== LAYER 3 : CoReFusion wordmark ===== -->
+    <div id="markLayer">
+      <div class="cmark" id="cmark"></div>
+      <div id="subtitle">
+        <div class="sub-title">Refactoring Identifier Names with Diffusion Large Language Models</div>
+        <div class="sub-meta">MSc Thesis Defense &nbsp;<span class="arrow">·</span>&nbsp; Y. Huang &nbsp;<span class="arrow">·</span>&nbsp; TU&#8202;Delft EEMCS &nbsp;<span class="arrow">·</span>&nbsp; 2026</div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<div class="hint"><kbd>Space</kbd> replay &nbsp; <kbd>C</kbd> hide ui</div>
+<div class="controls">
+  <button class="ctrl-btn active" id="btnPlay">Replay</button>
+  <button class="ctrl-btn" id="btnCapture">Hide UI</button>
+</div>
+
+<script>
+/* =====================================================================
+ *  CoReFusion — Defense opening reel
+ *  Scene 1  TU Delft logo  →  TUDelft.java
+ *  Scene 2  double-click  →  macOS IDE window opens
+ *  Scene 3  BSc thesis record revealed
+ *  Scene 4  diffusion denoising  (BSc → MSc, mask→low→high→commit)
+ *  Scene 5  MSc thesis-defense record settles
+ *  Scene 6  CoReFusion wordmark diffusion
+ * ===================================================================== */
+
+const $  = sel => document.querySelector(sel);
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+let RUN = 0;                              // bumps on replay to cancel stale loops
+const alive = id => id === RUN;
+
+/* ---- responsive fit ------------------------------------------------- */
+function fit() {
+  const k = Math.min(window.innerWidth / 1280, window.innerHeight / 800);
+  $('#fit').style.transform = `translate(-50%,-50%) scale(${k})`;
+}
+window.addEventListener('resize', fit);
+
+/* ---- deterministic PRNG (Mulberry32) -------------------------------- */
+function makePRNG(seed) {
+  return function () {
+    seed |= 0; seed = (seed + 0x6D2B79F5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+const POOL = 'abcdefghijklmnopqrstuvwxyz_AEIOU0123';
+const randTok = (rng, n) => Array.from({length: n}, () => POOL[Math.floor(rng()*POOL.length)]).join('');
+
+/* =====================================================================
+ *  DIFFUSION SITES  —  the tokens that denoise from BSc → MSc
+ * ===================================================================== */
+// wake   = fraction of the run (0..1) at which the site leaves <|mask|>.
+// commit = fraction at which it locks in (green, high confidence).
+//          Between wake and commit, confidence climbs every step.
+// pFinal = predicted probability shown once committed.
+// noise[]= plausible intermediate guesses cycled while low/high confidence.
+const SITES = {
+  studentNr:{ label: 'studentNr', pFinal: 0.99, wake: 0.00, commit: 0.25, cls: 'c',
+             bsc: '5560950', final: '5560950',                 // invariant identity
+             noise: ['55_0__0','55609__','5560950'] },
+  cls:     { label: 'class',     pFinal: 0.95, wake: 0.05, commit: 0.33, cls: 't',
+             bsc: 'TUDelft', final: 'CoReFusion',
+             noise: ['Co______','CoRe____','CoReFus__','CoReFusion'] },
+  stage:   { label: 'stage',     pFinal: 0.93, wake: 0.08, commit: 0.38, cls: 's',
+             bsc: '"BSc · 2024"', final: '"MSc · 2026"',
+             noise: ['"___ · ____"','"BSc · 2024"','"MSc · 202_"','"MSc · 2026"'] },
+  faculty: { label: 'faculty',   pFinal: 0.90, wake: 0.12, commit: 0.43, cls: 't',
+             bsc: 'EWI', final: 'EEMCS',
+             noise: ['E__S','E_M_S','EEMCS'] },
+  author:  { label: 'author',    pFinal: 0.91, wake: 0.15, commit: 0.49, cls: 's',
+             bsc: '"Yongcheng Huang"', final: '"Y. Huang"',
+             noise: ['"Y________ H____"','"Y. Hu_ng"','"Y. Huang"'] },
+  defense: { label: 'defense',   pFinal: 0.88, wake: 0.22, commit: 0.55, cls: 'c',
+             bsc: '2024/06/25', final: '2026',
+             noise: ['20__/__/__','2025','2026'] },
+  program: { label: 'program',   pFinal: 0.78, wake: 0.30, commit: 0.66, cls: 's',
+             bsc: '"BSc Computer Science and Engineering"', final: '"Master Thesis (2026)"',
+             noise: ['"M_____ Th____ (____)"','"Master Sci. (2026)"','"Master Thesis (2026)"'] },
+  m1:      { label: 'committee', pFinal: 0.81, wake: 0.34, commit: 0.70, cls: 's',
+             bsc: '"Prof. Dr. Arie van Deursen"', final: '"A. van Deursen     — Chair"',
+             noise: ['"A. v_n D______ — M_____"','"A. van Deursen     — Chair"'] },
+  m2:      { label: '·',         pFinal: 0.79, wake: 0.40, commit: 0.76, cls: 's', hideRow: true,
+             bsc: '"Asst. Prof. Dr. Maliheh Izadi"', final: '"M. Izadi           — Supervisor"',
+             noise: ['"M. Iz___       — M_____"','"M. Izadi           — Supervisor"'] },
+  m3:      { label: '·',         pFinal: 0.80, wake: 0.46, commit: 0.82, cls: 's', hideRow: true,
+             bsc: '"ir. Jonathan Katzy"', final: '"J.B. Katzy         — Supervisor"',
+             noise: ['"J.B. K____      — M_____"','"J.B. Katzy         — Supervisor"'] },
+  m4:      { label: '·',         pFinal: 0.74, wake: 0.52, commit: 0.90, cls: 's', hideRow: true,
+             bsc: null, final: '"P. Kellnhofer      — Committee"',
+             noise: ['"P. K________   — C________"','"P. Kellnhofer      — Committee"'] },
+  title:   { label: 'title',     pFinal: 0.84, wake: 0.40, commit: 1.00, cls: 's',
+             bsc: '"LLM of Babel: Evaluation of LLMs on code"',
+             final: '"CoReFusion: Refactoring Identifier Names"',
+             noise: ['"C_________: R__________ Id________ N____"',
+                     '"CoReFusion: Renaming Identifier Tokens"',
+                     '"CoReFusion: Refactoring Identifier Names"'] },
+};
+// rows shown in the side panel (committee aggregates m1..m4)
+const PANEL_ROWS = ['stage','cls','author','studentNr','program','title','m1','faculty','defense'];
+const PANEL_NAME = { stage:'@stage', cls:'class', author:'author', studentNr:'studentNr',
+                     program:'program', title:'title', m1:'committee', faculty:'faculty', defense:'defense' };
+
+/* ---- editor template ------------------------------------------------ *
+ *  {x} placeholders are diffusion sites.                                */
+const CODE_LINES = [
+  `<span class="an">@Thesis</span>(stage = {stage})`,
+  `<span class="k">public class</span> <span class="t">{cls}</span> <span class="k">extends</span> <span class="t">Defense</span> {`,
+  ``,
+  `    <span class="t">String</span>   author    = {author};`,
+  `    <span class="t">int</span>      studentNr = {studentNr};`,
+  `    <span class="t">String</span>   program   = {program};`,
+  `    <span class="t">String</span>   title     = {title};`,
+  ``,
+  `    <span class="t">Mentor</span>[] committee = {`,
+  `        {m1},`,
+  `        {m2},`,
+  `        {m3},`,
+  `        {m4}`,
+  `    };`,
+  ``,
+  `    <span class="t">Faculty</span>  faculty   = <span class="t">{faculty}</span>;`,
+  `    <span class="t">Year</span>     defense   = {defense};`,
+  `}`,
+];
+
+function siteSpan(key, phase, text) {
+  const s = SITES[key];
+  return `<span class="site ${key} ph-${phase} ${s.cls}" data-site="${key}">${text}</span>`;
+}
+
+/* render the editor at a given mode:
+ *   mode 'bsc'   → all sites show BSc value as plain ink
+ *   mode 'live'  → sites rendered from `phases`/`texts` maps (diffusion)        */
+function renderEditor(mode, phases, texts) {
+  const col = $('#codecol');
+  const html = CODE_LINES.map(line => {
+    if (line === '') return `<span class="ln">​</span>`;
+    return `<span class="ln">` + line.replace(/\{(\w+)\}/g, (_, key) => {
+      const s = SITES[key];
+      if (mode === 'bsc') {
+        if (s.bsc === null) return `<span class="site ${key} ph-mask ${s.cls}" data-site="${key}">&lt;|mask|&gt;</span>`;
+        return `<span class="site ${key} ph-ink ${s.cls}" data-site="${key}">${s.bsc}</span>`;
+      }
+      return siteSpan(key, phases[key], texts[key]);
+    }) + `</span>`;
+  }).join('');
+  col.innerHTML = html;
+
+  // gutter line numbers
+  $('#gutter').innerHTML = CODE_LINES.map((_, i) => `<div>${i + 1}</div>`).join('');
+}
+
+/* build the side panel rows */
+function buildPanel() {
+  $('#srows').innerHTML = PANEL_ROWS.map(key =>
+    `<div class="srow" id="row-${key}">
+       <span class="sq"></span>
+       <span class="name">${PANEL_NAME[key]}</span>
+       <span class="pv" id="pv-${key}">—</span>
+     </div>`).join('');
+  buildViz();
+}
+function setRow(key, phaseClass, pText) {
+  const row = $('#row-' + key);
+  if (!row) return;
+  row.className = 'srow ' + phaseClass;
+  $('#pv-' + key).textContent = pText;
+}
+
+/* =====================================================================
+ *  SCENE 1 — TU Delft logo → TUDelft.java
+ * ===================================================================== */
+let BRAND_DX = 0;     // px shift that keeps "TUDelft" screen-centred while ".java" reserves space
+const LIFT_Y = -150;  // how far the wordmark lifts when it becomes a filename
+function setBrand(ty, scale = 1) {
+  $('#brand').style.transform = `translate(${BRAND_DX}px, ${ty}px) scale(${scale})`;
+}
+function buildWordmark() {
+  const parts = [['T','tu'],['U','tu'],['D','delft'],['e','delft'],['l','delft'],['f','delft'],['t','delft']];
+  let html = parts.map(([c, cl]) => `<span class="wm-ch ${cl}">${c}</span>`).join('');
+  html += `<span class="wm-ext">` + [...'.java'].map(c => `<span class="wm-ch ext">${c}</span>`).join('') + `</span>`;
+  $('#wordmark').innerHTML = html;
+}
+
+async function sceneLogo(id) {
+  const layer = $('#logoLayer'), brand = $('#brand'), wm = $('#wordmark');
+  buildWordmark();
+  const chars   = [...wm.querySelectorAll('.wm-ch')];
+  const tuDelft = chars.filter(c => !c.classList.contains('ext'));
+  const extCh   = chars.filter(c =>  c.classList.contains('ext'));
+
+  // reset — every glyph hidden; "TUDelft" centred (compensate for reserved ".java")
+  BRAND_DX = wm.querySelector('.wm-ext').offsetWidth / 2;
+  chars.forEach(c => c.classList.remove('in', 'out'));
+  wm.classList.remove('selected');
+  brand.style.transition = 'none'; brand.style.opacity = 1; setBrand(0);
+  layer.style.transition = 'none'; layer.style.transform = 'scale(1)'; layer.style.opacity = 1;
+  void brand.offsetWidth;
+  brand.style.transition = 'transform 0.85s cubic-bezier(.5,.05,.2,1), opacity 0.6s ease';
+
+  // "TUDelft" rises in, one glyph at a time
+  await sleep(220); if (!alive(id)) return;
+  for (const c of tuDelft) { c.classList.add('in'); await sleep(88); if (!alive(id)) return; }
+  await sleep(1150); if (!alive(id)) return;            // hold at centre
+
+  // MOVE — the wordmark lifts up to become a filename ("TUDelft" still centred)
+  setBrand(LIFT_Y);
+  await sleep(780); if (!alive(id)) return;
+
+  // recentre on the FULL filename: slide left so "TUDelft.java" is screen-centred,
+  // while ".java" reveals glyph by glyph (a natural "make room" motion)
+  BRAND_DX = 0;
+  setBrand(LIFT_Y);
+  for (const c of extCh) { c.classList.add('in'); await sleep(72); if (!alive(id)) return; }
+  await sleep(820); if (!alive(id)) return;
+}
+
+/* =====================================================================
+ *  SCENE 2 — pointer double-clicks, IDE window opens
+ * ===================================================================== */
+async function sceneOpen(id) {
+  const ptr = $('#pointer'), rip = $('#ripple'), wm = $('#wordmark');
+  const ide = $('#ideLayer'), logo = $('#logoLayer');
+
+  // measure the "TUDelft.java" wordmark centre in design-space coordinates
+  const fitRect = $('#fit').getBoundingClientRect();
+  const k = fitRect.width / 1280;
+  const ir = wm.getBoundingClientRect();
+  const tx = (ir.left + ir.width / 2 - fitRect.left) / k;
+  const ty = (ir.top  + ir.height / 2 - fitRect.top)  / k;
+
+  // pointer enters from lower-right, tip lands on the filename
+  ptr.style.transform = `translate(${tx + 210}px, ${ty + 280}px)`;
+  ptr.style.opacity = 0;
+  await sleep(120); if (!alive(id)) return;
+  ptr.style.transition = 'transform .7s cubic-bezier(.4,0,.2,1), opacity .35s ease';
+  ptr.style.opacity = 1;
+  ptr.style.transform = `translate(${tx - 6}px, ${ty - 3}px)`;   // tip on filename
+  await sleep(760); if (!alive(id)) return;
+
+  // double click: ripple + filename select + tiny dip
+  const doClick = async () => {
+    rip.style.left = (tx - 9) + 'px'; rip.style.top = (ty - 9) + 'px';
+    rip.classList.remove('go'); void rip.offsetWidth; rip.classList.add('go');
+    wm.classList.add('selected');
+    setBrand(LIFT_Y, .97);
+    await sleep(120);
+    setBrand(LIFT_Y, 1);
+  };
+  await doClick(); if (!alive(id)) return;
+  await sleep(150);
+  await doClick(); if (!alive(id)) return;
+  await sleep(240); if (!alive(id)) return;
+
+  ptr.style.opacity = 0;
+
+  // the IDE window blooms open from the file's position
+  buildPanel();
+  renderEditor('bsc');
+  $('#ideTab').textContent = 'TUDelft.java';
+  $('#logLine').classList.remove('show');
+
+  logo.style.transition = 'opacity .5s ease, transform .6s ease';
+  logo.style.opacity = 0; logo.style.transform = 'scale(1.08)';
+
+  ide.style.transition = 'opacity .55s ease, transform .62s cubic-bezier(.34,1.3,.5,1)';
+  ide.style.transformOrigin = '50% 45%';
+  ide.style.opacity = 1; ide.style.transform = 'scale(1)';
+  await sleep(680); if (!alive(id)) return;
+}
+
+/* =====================================================================
+ *  SCENE 3 — reveal BSc record, then "noise" the value sites
+ * ===================================================================== */
+async function sceneRevealBSc(id) {
+  // panel rows settled (BSc record is a clean, committed document)
+  PANEL_ROWS.forEach(k => setRow(k, 'is-commit', '1.00'));
+  $('#tNow').textContent = 't = —'; $('#tBar').style.width = '0%';
+  await sleep(900); if (!alive(id)) return;
+
+  // run the refactor: show the call log
+  const log = $('#logLine');
+  log.innerHTML = `<span class="run">▸</span> dLLM.denoise(<span class="run">TUDelft.java</span>)`;
+  log.classList.add('show');
+  await sleep(750); if (!alive(id)) return;
+
+  // forward (noising) sweep: mask every value site left→right
+  const order = ['stage','cls','author','studentNr','program','title','m1','m2','m3','m4','faculty','defense'];
+  for (const k of order) {
+    if (!alive(id)) return;
+    const el = document.querySelector(`.site.${k}`);
+    if (el) {
+      el.className = `site ${k} ph-mask ${SITES[k].cls}`;
+      el.innerHTML = '&lt;|mask|&gt;';
+    }
+    const pk = PANEL_ROWS.includes(k) ? k : null;
+    if (pk) setRow(pk, 'is-mask', '—');
+    await sleep(70);
+  }
+  await sleep(380); if (!alive(id)) return;
+}
+
+/* =====================================================================
+ *  SCENE 4 — diffusion denoising: BSc masks → MSc record
+ * ===================================================================== */
+const T_STEPS = 12;                      // number of (clearly-shown) diffusion steps
+const HIGH_CONF = 0.60;                   // p threshold where yellow → orange
+
+// state of one site at global progress g (0..1): which phase, what confidence,
+// and which (progressively-less-scrambled) guess to show.
+function siteState(s, g) {
+  if (g < s.wake)    return { phase: 'mask',   conf: null,    idx: 0 };
+  if (g >= s.commit) return { phase: 'commit', conf: s.pFinal, idx: s.noise.length - 1 };
+  const local = (g - s.wake) / (s.commit - s.wake);          // 0..1 inside resolve window
+  const conf  = 0.30 + local * (s.pFinal - 0.30);            // confidence climbs monotonically
+  const idx   = Math.min(s.noise.length - 1, Math.floor(local * s.noise.length));
+  return { phase: conf < HIGH_CONF ? 'low' : 'high', conf, idx };
+}
+function siteText(s, st) {
+  if (st.phase === 'mask')   return '&lt;|mask|&gt;';
+  if (st.phase === 'commit') return s.final;
+  return s.noise[st.idx];                  // low/high: a guess that sharpens toward the answer
+}
+const PHASE_CLS = { mask: 'is-mask', low: 'is-low', high: 'is-high', commit: 'is-commit' };
+const COMMITTEE = ['m1', 'm2', 'm3', 'm4'];
+
+// committee panel row aggregates its four members
+function committeeState(g) {
+  const sts = COMMITTEE.map(c => siteState(SITES[c], g));
+  if (sts.every(x => x.phase === 'mask'))   return { phase: 'mask',   conf: null };
+  if (sts.every(x => x.phase === 'commit')) {
+    const p = COMMITTEE.reduce((a, c) => a + SITES[c].pFinal, 0) / 4;
+    return { phase: 'commit', conf: p };
+  }
+  let sum = 0, cnt = 0;
+  sts.forEach((x, i) => {
+    if (x.phase === 'mask') return;
+    cnt++; sum += (x.phase === 'commit') ? SITES[COMMITTEE[i]].pFinal : x.conf;
+  });
+  const conf = sum / cnt;
+  return { phase: conf < HIGH_CONF ? 'low' : 'high', conf };
+}
+
+/* =====================================================================
+ *  ABSTRACT dLLM INTERNALS  (referencing diffusion-LM behaviour)
+ *  · vocab confidence rank — the categorical distribution over candidate
+ *    tokens sharpening / re-ranking toward the winner as t grows.
+ *  · edit signal — per-position remask/edit intensity; a wave of activity
+ *    that peaks while a token is uncertain and dies once it commits.
+ * ===================================================================== */
+const VOCAB = [                          // candidate tokens for the title's key verb
+  { tok: 'Refactoring', t: 0.62, winner: true },
+  { tok: 'Renaming',    t: 0.17 },
+  { tok: 'Rewriting',   t: 0.10 },
+  { tok: 'Relabeling',  t: 0.07 },
+  { tok: 'Editing',     t: 0.04 },
+];
+const EDIT_ORDER = ['stage','cls','author','studentNr','program','title','m1','m2','m3','m4','faculty','defense'];
+const hash2 = (a, b) => { const x = Math.sin(a * 12.9898 + b * 78.233) * 43758.5453; return x - Math.floor(x); };
+
+// categorical distribution over VOCAB at a given step: high temperature +
+// decaying noise early (uncertain, re-ranking) → peaked at the winner late.
+function vocabDist(step) {
+  const g = step / T_STEPS;
+  const temp = Math.max(0.42, 1.95 - 1.6 * g);
+  const noiseAmp = 0.95 * Math.max(0, 1 - g / 0.65);
+  const logits = VOCAB.map((v, i) =>
+    (Math.log(v.t + 1e-3) + noiseAmp * (hash2(i + 1, step + 1) - 0.5) * 2.4) / temp);
+  const m = Math.max(...logits);
+  const ex = logits.map(l => Math.exp(l - m));
+  const Z = ex.reduce((a, b) => a + b, 0);
+  return ex.map(e => e / Z);
+}
+
+function buildViz() {
+  $('#vrank').innerHTML = VOCAB.map((v, i) =>
+    `<div class="vrow" id="vrow-${i}" style="transform:translateY(${i * 24}px)">
+       <span class="vlabel">${v.tok}</span>
+       <span class="vbarwrap"><span class="vbar"></span></span>
+       <span class="vp">—</span>
+     </div>`).join('');
+  $('#esig').innerHTML = EDIT_ORDER.map((k, i) => `<span class="ebar" id="ebar-${i}"></span>`).join('');
+}
+
+function updateViz(step) {
+  const g = step / T_STEPS;
+  // vocab confidence rank — re-rank rows by probability, bars + winner highlight
+  const dist = vocabDist(step);
+  dist.map((p, i) => [p, i]).sort((a, b) => b[0] - a[0]).forEach(([p, idx], rank) => {
+    const row = $('#vrow-' + idx);
+    row.style.transform = `translateY(${rank * 24}px)`;
+    row.querySelector('.vbar').style.width = (p * 100).toFixed(0) + '%';
+    row.querySelector('.vp').textContent = p.toFixed(2);
+    row.classList.toggle('win', rank === 0 && VOCAB[idx].winner);
+  });
+  // edit signal — per-position remask intensity (peaks mid-resolve, dies on commit)
+  EDIT_ORDER.forEach((k, i) => {
+    const s = SITES[k], st = siteState(s, g);
+    let inten, cls;
+    if (st.phase === 'mask')        { inten = 0.14; cls = 'masked'; }
+    else if (st.phase === 'commit') { inten = 0.05; cls = 'committed'; }
+    else { const local = (g - s.wake) / (s.commit - s.wake);
+           inten = 0.30 + 0.70 * Math.sin(Math.PI * local); cls = 'active'; }
+    const bar = $('#ebar-' + i);
+    bar.className = 'ebar ' + cls;
+    bar.style.height = (Math.min(1, inten) * 100).toFixed(0) + '%';
+  });
+}
+
+async function sceneDiffuse(id) {
+  const log = $('#logLine');
+
+  // ---- PROMINENT DIFFUSION-START INDICATOR ----
+  updateViz(0);
+  const wf = $('#wavefront');
+  wf.classList.remove('sweep'); void wf.offsetWidth; wf.classList.add('sweep');
+  $('#diffDot').classList.add('on');           // live "diffusing" pulse
+  $('#vizwrap').classList.add('active');       // light up the internals viz
+  // integrated "Diffusion" status bar (a running-process indicator, not a modal)
+  log.className = 'logline show diffusing';
+  log.innerHTML = `<span class="lspin"></span><span class="dlabel">Diffusion</span>&nbsp;&nbsp;<span class="dstep" id="logStep">t = 0 / ${T_STEPS}</span>`;
+  await sleep(760); if (!alive(id)) return;
+
+  const keys = Object.keys(SITES);
+  const prev = {};                         // previous phase per key (for commit pulse)
+  keys.forEach(k => prev[k] = 'mask');
+
+  for (let step = 0; step <= T_STEPS; step++) {
+    if (!alive(id)) return;
+    const g = step / T_STEPS;
+    $('#tNow').innerHTML = `t = ${step}`;
+    $('#tBar').style.width = (g * 100).toFixed(1) + '%';
+    const ls = $('#logStep'); if (ls) ls.textContent = `t = ${step} / ${T_STEPS}`;
+
+    // ---- code tokens ----
+    for (const k of keys) {
+      const s = SITES[k], st = siteState(s, g);
+      const el = document.querySelector(`.site.${k}`);
+      if (el) {
+        el.className = `site ${k} ph-${st.phase} ${s.cls}`;
+        el.innerHTML = siteText(s, st);
+        if (st.phase === 'commit' && prev[k] !== 'commit') {   // pulse on lock-in
+          el.classList.add('flash');
+          setTimeout(() => el.classList.remove('flash'), 650);
+        }
+      }
+      if (k === 'cls' && st.phase === 'commit') $('#ideTab').textContent = 'CoReFusion.java';
+      prev[k] = st.phase;
+    }
+
+    // ---- side panel (confidence + colour, in lock-step with the tokens) ----
+    for (const k of PANEL_ROWS) {
+      const st = (k === 'm1') ? committeeState(g) : siteState(SITES[k], g);
+      setRow(k, PHASE_CLS[st.phase], st.conf == null ? '—' : st.conf.toFixed(2));
+      const row = $('#row-' + k);
+      if (row && st.phase === 'commit' && !row.dataset.done) {
+        row.dataset.done = '1';
+        row.classList.add('rowflash');
+        setTimeout(() => row.classList.remove('rowflash'), 650);
+      }
+    }
+
+    // ---- abstract internals (vocab confidence rank + edit signal) ----
+    updateViz(step);
+
+    await sleep(step === 0 ? 560 : 440);   // slow, readable steps
+  }
+
+  // final lock-in: a green pulse across the whole record
+  keys.forEach(k => { const el = document.querySelector(`.site.${k}`); if (el) el.classList.add('flash'); });
+  $('#tNow').innerHTML = `t = T`;
+  $('#diffDot').classList.remove('on');
+  log.className = 'logline show';
+  log.innerHTML = `<span class="ok">✓</span> committed`;
+  await sleep(680); if (!alive(id)) return;
+  document.querySelectorAll('.site.flash').forEach(e => e.classList.remove('flash'));
+  $('#srows').querySelectorAll('.srow').forEach(r => delete r.dataset.done);
+}
+
+/* =====================================================================
+ *  SCENE 5 — MSc record settles to a clean document, hold
+ * ===================================================================== */
+async function sceneSettle(id) {
+  await sleep(900); if (!alive(id)) return;
+  // ease committed-green sites back to clean ink (a finished record)
+  Object.keys(SITES).forEach(k => {
+    const el = document.querySelector(`.site.${k}`);
+    if (el) el.className = `site ${k} ph-ink ${SITES[k].cls}`;
+  });
+  PANEL_ROWS.forEach(k => setRow(k, 'is-commit', SITES[k].pFinal.toFixed(2)));
+  $('#logLine').classList.remove('show');
+  await sleep(1850); if (!alive(id)) return;
+}
+
+/* =====================================================================
+ *  SCENE 6 — collapse IDE → CoReFusion wordmark diffusion
+ *  (ported from docs/logo/index.html)
+ * ===================================================================== */
+const TARGET = 'CoReFusion';
+function classForChar(i){ return i<2?'co':(i===2||i===3)?'re':'fusion'; }
+function shuffled(n, rng){ const a=[...Array(n).keys()];
+  for(let i=a.length-1;i>0;i--){const j=Math.floor(rng()*(i+1));[a[i],a[j]]=[a[j],a[i]];} return a; }
+
+function renderMark(states, showCursor) {
+  const html = states.map((s,i)=>{
+    const cls = s.resolved?classForChar(i):(s.trans?'trans':'mask');
+    const ch  = s.resolved?TARGET[i]:(s.trans?s.tempChar:'█');
+    return `<span class="cchar ${cls}">${ch}</span>`;
+  }).join('') + (showCursor?'<span class="ccursor"></span>':'');
+  $('#cmark').innerHTML = html;
+}
+
+async function sceneWordmark(id) {
+  // collapse the IDE
+  const ide = $('#ideLayer'), mark = $('#markLayer');
+  ide.style.transition = 'opacity .55s ease, transform .6s cubic-bezier(.5,.05,.5,1)';
+  ide.style.transformOrigin = '50% 50%';
+  ide.style.opacity = 0; ide.style.transform = 'scale(.72)';
+  await sleep(520); if (!alive(id)) return;
+
+  mark.style.transition = 'opacity .6s ease';
+  mark.style.opacity = 1;
+
+  const rng = makePRNG(42);
+  const states = TARGET.split('').map(()=>({resolved:false,trans:false,tempChar:'█'}));
+  renderMark(states, true);
+  await sleep(420); if (!alive(id)) return;
+
+  const blueIdx=[], orangeIdx=[];
+  for (let i=0;i<TARGET.length;i++){ const c=classForChar(i);
+    if(c==='re') orangeIdx.push(i); else blueIdx.push(i); }
+  const blueOrder = shuffled(blueIdx.length, rng).map(k=>blueIdx[k]);
+
+  const STEPS = 22;
+  for (let step=0; step<STEPS; step++){
+    if (!alive(id)) return;
+    const prog = step/(STEPS-1);
+    for (let i=0;i<TARGET.length;i++){
+      if(!states[i].resolved){
+        if(rng()<0.3+prog*0.55){ states[i].trans=true;
+          states[i].tempChar = POOL[Math.floor(rng()*26)]; }
+        else states[i].trans=false;
+      }
+    }
+    const target = Math.floor(prog*blueOrder.length*1.05);
+    for(let k=0;k<Math.min(target,blueOrder.length);k++) states[blueOrder[k]].resolved=true;
+    renderMark(states, true);
+    await sleep(105);
+  }
+  blueOrder.forEach(k=>states[k].resolved=true); renderMark(states, true);
+
+  // dramatic hold: R/e still cycling
+  for(let b=0;b<4;b++){ if(!alive(id))return;
+    for(let i=0;i<TARGET.length;i++) if(!states[i].resolved){ states[i].trans=true;
+      states[i].tempChar=POOL[Math.floor(rng()*26)]; }
+    renderMark(states, true); await sleep(140);
+  }
+  // R then e snap into orange
+  for(const k of orangeIdx){ if(!alive(id))return;
+    states[k].resolved=true; renderMark(states, true); await sleep(260); }
+
+  await sleep(450); if(!alive(id))return;
+  $('#subtitle').style.opacity = 1;
+}
+
+/* =====================================================================
+ *  MASTER TIMELINE
+ * ===================================================================== */
+async function play() {
+  const id = ++RUN;
+  // hard reset of layers
+  $('#ideLayer').style.transition = 'none';
+  $('#ideLayer').style.opacity = 0; $('#ideLayer').style.transform = 'scale(.18)';
+  $('#markLayer').style.transition = 'none';
+  $('#markLayer').style.opacity = 0;
+  $('#subtitle').style.opacity = 0;
+  $('#cmark').innerHTML = '';
+  // reset diffusion-start indicator + internals viz
+  $('#diffDot').classList.remove('on');
+  $('#vizwrap').classList.remove('active');
+  $('#wavefront').classList.remove('sweep');
+  $('#logLine').className = 'logline';
+  void $('#ideLayer').offsetWidth;
+
+  await sceneLogo(id);        if (!alive(id)) return;
+  await sceneOpen(id);        if (!alive(id)) return;
+  await sceneRevealBSc(id);   if (!alive(id)) return;
+  await sceneDiffuse(id);     if (!alive(id)) return;
+  await sceneSettle(id);      if (!alive(id)) return;
+  await sceneWordmark(id);    if (!alive(id)) return;
+}
+
+/* ---- controls ------------------------------------------------------- */
+$('#btnPlay').addEventListener('click', () => play());
+$('#btnCapture').addEventListener('click', () => document.body.classList.toggle('capture'));
+document.addEventListener('keydown', e => {
+  if (e.code === 'Space') { e.preventDefault(); play(); }
+  else if (e.code === 'KeyC' || e.code === 'Escape') document.body.classList.toggle('capture');
+});
+
+/* ---- debug jump (for screenshot verification) ----------------------- */
+function showIDE() {
+  ++RUN; $('#logoLayer').style.opacity=0; $('#markLayer').style.opacity=0;
+  $('#ideLayer').style.transition='none'; $('#ideLayer').style.opacity=1;
+  $('#ideLayer').style.transform='scale(1)';
+}
+window.__demo = {
+  bsc()  { showIDE(); buildPanel(); renderEditor('bsc');
+           PANEL_ROWS.forEach(k=>setRow(k,'is-commit','1.00')); },
+  // freeze a representative diffusion frame at global progress `prog`
+  diffuse(prog=0.55) {
+    showIDE(); buildPanel();
+    const phases={}, texts={};
+    Object.keys(SITES).forEach(k=>{ const st=siteState(SITES[k],prog);
+      phases[k]=st.phase; texts[k]=siteText(SITES[k],st); });
+    renderEditor('live', phases, texts);
+    PANEL_ROWS.forEach(k=>{ const st=(k==='m1')?committeeState(prog):siteState(SITES[k],prog);
+      setRow(k, PHASE_CLS[st.phase], st.conf==null?'—':st.conf.toFixed(2)); });
+    $('#tNow').innerHTML='t = '+Math.round(prog*T_STEPS); $('#tBar').style.width=(prog*100)+'%';
+    const _s=Math.round(prog*T_STEPS);
+    $('#logLine').className='logline show diffusing';
+    $('#logLine').innerHTML=`<span class="lspin"></span><span class="dlabel">Diffusion</span>&nbsp;&nbsp;<span class="dstep">t = ${_s} / ${T_STEPS}</span>`;
+    $('#diffDot').classList.add('on'); $('#vizwrap').classList.add('active');
+    updateViz(Math.round(prog*T_STEPS));
+    if(phases.cls==='commit') $('#ideTab').textContent='CoReFusion.java';
+  },
+  msc() {
+    showIDE(); buildPanel();
+    const phases={}, texts={}; Object.keys(SITES).forEach(k=>{phases[k]='ink';texts[k]=SITES[k].final;});
+    renderEditor('live', phases, texts);
+    $('#ideTab').textContent='CoReFusion.java';
+    PANEL_ROWS.forEach(k=>setRow(k,'is-commit',SITES[k].pFinal.toFixed(2)));
+    $('#tNow').innerHTML='t = T'; $('#tBar').style.width='100%';
+  },
+  async mark() { ++RUN; const id=RUN; $('#ideLayer').style.opacity=0; $('#logoLayer').style.opacity=0;
+    $('#markLayer').style.transition='none'; $('#markLayer').style.opacity=1;
+    await sceneWordmark(id); },
+  logo() { play(); },
+};
+
+/* ---- boot ----------------------------------------------------------- */
+//  ?capture=1  → no autoplay + hidden UI; an external recorder calls
+//  window.__start() under a controlled (virtual-time) clock to render a video.
+const CAPTURE = new URLSearchParams(location.search).has('capture');
+window.__start = () => { play(); };     // fire-and-forget (don't return the promise)
+window.__duration = 28000;     // ms — full reel length (for the recorder)
+fit();
+function boot(){ fit(); if (!CAPTURE) play(); }
+if (CAPTURE) document.body.classList.add('capture');
+if (document.fonts && document.fonts.ready) document.fonts.ready.then(boot);
+else window.addEventListener('load', boot);
+</script>
+</body>
+</html>

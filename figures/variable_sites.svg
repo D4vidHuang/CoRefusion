@@ -1,0 +1,97 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="440" viewBox="0 0 1000 440" font-family="Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="7" refY="3.2" orient="auto" markerUnits="userSpaceOnUse">
+      <path d="M0,0 L8,3.2 L0,6.4 Z" fill="#5C6B78"/>
+    </marker>
+  </defs>
+
+  <!-- background -->
+  <rect x="0" y="0" width="1000" height="440" fill="#FFFFFF"/>
+
+  <!-- title -->
+  <text x="40" y="44" font-size="20" font-weight="700" fill="#14202B">One variable in one file: a single declaration and multiple usage sites</text>
+  <text x="40" y="68" font-size="13.5" fill="#5C6B78">The localization unit for a variable-naming refactoring spans every occurrence of the symbol.</text>
+
+  <!-- ================= CODE PANEL ================= -->
+  <rect x="40" y="92" width="530" height="328" rx="12" fill="#FFFFFF" stroke="#D9E2EA" stroke-width="1.5"/>
+  <!-- window dots + filename -->
+  <circle cx="62" cy="113" r="4" fill="#CBD6DF"/>
+  <circle cx="78" cy="113" r="4" fill="#CBD6DF"/>
+  <circle cx="94" cy="113" r="4" fill="#CBD6DF"/>
+  <text x="118" y="118" font-size="13" fill="#5C6B78" font-family="Menlo, 'DejaVu Sans Mono', monospace">OrderService.java</text>
+  <line x1="40" y1="132" x2="570" y2="132" stroke="#D9E2EA" stroke-width="1.2"/>
+
+  <!-- occurrence highlight backgrounds: centered on s glyph. pen=86+idx*9.0, glyph center=pen+4, vert center=baseline-4.5 -->
+  <rect x="155" y="174.5" width="14" height="18" rx="4" fill="#D1E6F4"/>   <!-- L2 decl, idx 8 -->
+  <rect x="155" y="230.5" width="14" height="18" rx="4" fill="#FFE8D1"/>   <!-- L4, idx 8 -->
+  <rect x="155" y="286.5" width="14" height="18" rx="4" fill="#FFE8D1"/>   <!-- L6, idx 8 -->
+  <rect x="155" y="314.5" width="14" height="18" rx="4" fill="#FFE8D1"/>   <!-- L7 a, idx 8 -->
+  <rect x="272" y="314.5" width="14" height="18" rx="4" fill="#FFE8D1"/>   <!-- L7 b, idx 21 -->
+  <rect x="182" y="370.5" width="14" height="18" rx="4" fill="#FFE8D1"/>   <!-- L9, idx 11 -->
+
+  <!-- gutter markers (cy = code baseline - 4) -->
+  <circle cx="52" cy="184" r="4" fill="#0076C2"/>
+  <circle cx="52" cy="240" r="4" fill="#FF8000"/>
+  <circle cx="52" cy="296" r="4" fill="#FF8000"/>
+  <circle cx="52" cy="324" r="4" fill="#FF8000"/>
+  <circle cx="52" cy="380" r="4" fill="#FF8000"/>
+
+  <!-- line numbers -->
+  <g font-family="Menlo, 'DejaVu Sans Mono', monospace" font-size="12" fill="#9AAAB6" text-anchor="end">
+    <text x="74" y="160">1</text>
+    <text x="74" y="188">2</text>
+    <text x="74" y="216">3</text>
+    <text x="74" y="244">4</text>
+    <text x="74" y="272">5</text>
+    <text x="74" y="300">6</text>
+    <text x="74" y="328">7</text>
+    <text x="74" y="356">8</text>
+    <text x="74" y="384">9</text>
+    <text x="70" y="412">10</text>
+  </g>
+
+  <!-- code -->
+  <g font-family="Menlo, 'DejaVu Sans Mono', monospace" font-size="15" fill="#3A4A57" xml:space="preserve">
+    <text x="86" y="160">public int computeTotal(List&lt;Order&gt; orders) {</text>
+    <text x="86" y="188">    int <tspan font-weight="700" fill="#00558C">s</tspan> = 0;</text>
+    <text x="86" y="216">    for (Order o : orders) {</text>
+    <text x="86" y="244">        <tspan font-weight="700" fill="#B85C00">s</tspan> += o.getAmount();</text>
+    <text x="86" y="272">    }</text>
+    <text x="86" y="300">    if (<tspan font-weight="700" fill="#B85C00">s</tspan> &gt; LIMIT) {</text>
+    <text x="86" y="328">        <tspan font-weight="700" fill="#B85C00">s</tspan> = applyCap(<tspan font-weight="700" fill="#B85C00">s</tspan>);</text>
+    <text x="86" y="356">    }</text>
+    <text x="86" y="384">    return <tspan font-weight="700" fill="#B85C00">s</tspan>;</text>
+    <text x="86" y="412">}</text>
+  </g>
+
+  <!-- ================= CONNECTOR ================= -->
+  <line x1="582" y1="248" x2="650" y2="248" stroke="#5C6B78" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="616" y="238" font-size="11.5" fill="#5C6B78" text-anchor="middle">same symbol</text>
+
+  <!-- ================= SUMMARY CARD ================= -->
+  <rect x="664" y="112" width="296" height="272" rx="14" fill="#F2F6FA" stroke="#D9E2EA" stroke-width="1.5"/>
+
+  <text x="688" y="150" font-size="11.5" font-weight="700" fill="#5C6B78" letter-spacing="1.5">VARIABLE</text>
+  <rect x="688" y="160" width="34" height="30" rx="6" fill="#FFFFFF" stroke="#D9E2EA" stroke-width="1.2"/>
+  <text x="705" y="181" font-size="17" font-weight="700" fill="#14202B" text-anchor="middle" font-family="Menlo, 'DejaVu Sans Mono', monospace">s</text>
+
+  <!-- stat: declaration (square center vertically aligned with the label baseline) -->
+  <rect x="688" y="212" width="20" height="20" rx="5" fill="#0076C2"/>
+  <text x="718" y="227" font-size="14.5" font-weight="700" fill="#14202B">1</text>
+  <text x="733" y="227" font-size="14.5" fill="#14202B">declaration site</text>
+  <text x="718" y="245" font-size="11.5" fill="#5C6B78">where the variable is introduced</text>
+
+  <!-- stat: usages -->
+  <rect x="688" y="262" width="20" height="20" rx="5" fill="#FF8000"/>
+  <text x="718" y="277" font-size="14.5" font-weight="700" fill="#14202B">5</text>
+  <text x="733" y="277" font-size="14.5" fill="#14202B">usage references</text>
+  <text x="718" y="295" font-size="11.5" fill="#5C6B78">read / write across 4 lines</text>
+
+  <line x1="688" y1="312" x2="936" y2="312" stroke="#D9E2EA" stroke-width="1.2"/>
+
+  <text x="688" y="334" font-size="12.5" fill="#5C6B78">
+    <tspan x="688" dy="0">Every occurrence binds to the same symbol, so</tspan>
+    <tspan x="688" dy="18">a correct refactoring must localize the</tspan>
+    <tspan x="688" dy="18">declaration <tspan font-weight="700" fill="#00558C">and</tspan> all usage sites together.</tspan>
+  </text>
+</svg>
