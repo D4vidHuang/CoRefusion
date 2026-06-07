@@ -339,7 +339,10 @@ def materialize_model(model_id, code_repo, hf_token=None):
         return model_id
     local_dir = os.path.join(LOCAL_MODELS_DIR, model_id.replace("/", "__"))
     print(f"  Materialising {model_id} -> {local_dir}")
-    snapshot_download(repo_id=model_id, local_dir=local_dir, token=hf_token)
+    # Skip the training-only blobs the AISE repos ship (optimizer_state.pt /
+    # training_state.pt are ~2-3x the model size and would blow Colab disk).
+    snapshot_download(repo_id=model_id, local_dir=local_dir, token=hf_token,
+                      ignore_patterns=["optimizer_state.pt", "training_state.pt"])
 
     for fn in CODE_FILES:
         dst = os.path.join(local_dir, fn)
