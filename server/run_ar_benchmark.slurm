@@ -1,21 +1,5 @@
 #!/bin/bash
-# 在 DAIC 上跑【单个 AR 模型】的 refineID 推理 + 全site一致性门控指标。
-# 默认 Qwen2.5-Coder-7B(decoder-only / FIM)。复用统一脚本
-# experiments/run_all_refineID_unified.py,结果写到 results/unified_refineID/。
-#
-# 用法(先 cd 到仓库根,并确保 logs/ 存在):
-#   cd /tudelft.net/staff-umbrella/CoReFusion/CoRefusion && mkdir -p logs
-#   sbatch server/run_ar_benchmark.slurm                                  # Qwen2.5-Coder-7B 全量
-#   sbatch server/run_ar_benchmark.slurm --max-samples 20                 # 冒烟(先跑这个验证链路)
-#   MODEL=CodeLlama-7B   sbatch server/run_ar_benchmark.slurm             # 换一个 AR 模型
-#   MODEL=Qwen2.5-Coder-14B sbatch --gres=gpu:a40:2 server/run_ar_benchmark.slurm  # 大模型多卡(device_map=auto 自动分片)
-# 脚本名后的参数原样透传给 run_all_refineID_unified.py(如 --max-samples / --resume)。
-#
-# 注:
-#  - Qwen / StarCoder2 / DeepSeek 是 public,无需 token。
-#    CodeLlama / CodeGemma 是 gated → 先 `export HF_TOKEN=hf_xxx` 再 sbatch。
-#  - 模型名见 `python experiments/run_all_refineID_unified.py --list`。
-#
+
 #SBATCH --job-name=corefusion_ar
 #SBATCH --gres=gpu:a40:1
 #SBATCH --nodes=1

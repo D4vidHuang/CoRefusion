@@ -43,10 +43,20 @@ if command -v module >/dev/null 2>&1; then
     module load py-torch/2.5.1    2>/dev/null || true
 fi
 
-# ---- venv on the umbrella --------------------------------------------------
-# venv 里装的是我们自己的 transformers==4.57.1 等，会 shadow 掉 module 自带版本。
-if [ -d "$VENV_DIR" ]; then
-    source "$VENV_DIR/bin/activate"
+# ---- python env on the umbrella --------------------------------------------
+# 优先用 venv;若 venv 建不出来(NFS 限制),退回 pip --target 的 pylibs 目录。
+# 注意:venv 的 source 必须容错(|| true),否则在 set -e 的 SLURM 脚本里
+# 一旦 activate 不存在会让整个 job 秒退。
+if [ -f "$VENV_DIR/bin/activate" ]; then
+    # shellcheck disable=SC1090
+    source "$VENV_DIR/bin/activate" || true
+    echo "[env_daic] python env: venv ($VENV_DIR)"
+elif [ -d "$UMBRELLA/pylibs" ]; then
+    export PYTHONPATH="$UMBRELLA/pylibs:${PYTHONPATH:-}"
+    echo "[env_daic] python env: pylibs ($UMBRELLA/pylibs via PYTHONPATH)"
+else
+    echo "[env_daic] WARNING: 没有 venv 也没有 pylibs,只有 module python。" >&2
+    echo "[env_daic] 若 import transformers 失败,先跑一次性安装(见 server/README 或下面命令)。" >&2
 fi
 
 # 进入项目目录（job 里相对路径 data/test.csv 才能找到）。
