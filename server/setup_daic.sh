@@ -18,12 +18,29 @@ python -c "import torch; print('module torch:', torch.__version__, '| cuda build
     || { echo "ERROR: py-torch module not loaded. Run \`module avail py-torch\` and fix env_daic.sh"; exit 1; }
 
 # 1) venv on the umbrella, reusing module torch via --system-site-packages ----
-if [ ! -d "$VENV_DIR" ]; then
-    echo ">> creating venv at $VENV_DIR"
-    python -m venv "$VENV_DIR" --system-site-packages
+# DAIC 的 module python (spack 'python-venv') 的 ensurepip 是坏的,所以用
+# --without-pip 建 venv,再手动 bootstrap pip,绕开 ensurepip。
+if [ -d "$VENV_DIR" ] && [ ! -x "$VENV_DIR/bin/python" ]; then
+    echo ">> nuking half-built venv from a previous run (NFS leftovers)"
+    rm -rf "$VENV_DIR" "$(dirname "$VENV_DIR")"/.trash_* 2>/dev/null || true
+    # if a file refuses to delete (NFS), move the dir aside so the path is clean
+    [ -e "$VENV_DIR" ] && mv "$VENV_DIR" "$(dirname "$VENV_DIR")/.trash_$$" 2>/dev/null || true
+fi
+if [ ! -x "$VENV_DIR/bin/python" ]; then
+    echo ">> creating venv at $VENV_DIR (--without-pip --copies, NFS-safe)"
+    mkdir -p "$(dirname "$VENV_DIR")"
+    python -m venv "$VENV_DIR" --system-site-packages --without-pip --copies
 fi
 source "$VENV_DIR/bin/activate"
 echo ">> venv python: $(command -v python)  ($(python --version))"
+
+# bootstrap pip into the venv if it isn't already importable
+if ! python -m pip --version >/dev/null 2>&1; then
+    echo ">> bootstrapping pip via get-pip.py"
+    curl -sSL https://bootstrap.pypa.io/get-pip.py -o "$TMPDIR/get-pip.py"
+    python "$TMPDIR/get-pip.py"
+fi
+python -m pip --version
 
 # 2) deps (transformers pinned; torch stays the module one) ------------------
 python -m pip install --upgrade pip

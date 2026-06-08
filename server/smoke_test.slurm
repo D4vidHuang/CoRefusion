@@ -5,17 +5,16 @@
 #   squeue -u $USER ; tail -f logs/smoke_<jobid>.out
 #
 #SBATCH --job-name=corefusion_smoke
-#SBATCH --account=testusers
-#SBATCH --partition=ewi-st
-#SBATCH --gres=gpu:nvidia_a40:1
-#SBATCH --time=00:30:00
+#SBATCH --gres=gpu:a40:1
+#SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=16G
-#SBATCH --output=logs/smoke_%j.out
-#SBATCH --error=logs/smoke_%j.err
-# 想试 Blackwell 卡(需 torch>=2.7,module 的 2.5.1 大概率不支持)就换成:
-##SBATCH --gres=gpu:nvidia_rtx_pro_6000:1
+#SBATCH --time=00:30:00
+#SBATCH --output=logs/smoke-%j.out
+#SBATCH --error=logs/smoke-%j.err
+# 跟师兄验证过的脚本一致:不写 --account / --partition,用 DAIC 默认(默认分区=all)。
+# gres 用 a40(他用的 gpu:a40:3)。若报 "Invalid GRES",换成 gpu:nvidia_a40:1。
 
 set -euo pipefail
 source /tudelft.net/staff-umbrella/CoReFusion/CoRefusion/server/env_daic.sh

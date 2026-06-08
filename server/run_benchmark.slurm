@@ -9,15 +9,16 @@
 # (脚本名后面的参数都会原样传给 benchmark 脚本)
 #
 #SBATCH --job-name=corefusion_bench
-#SBATCH --account=testusers
-#SBATCH --partition=ewi-st
-#SBATCH --gres=gpu:nvidia_a40:1
-#SBATCH --time=24:00:00
+#SBATCH --gres=gpu:a40:1
+#SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=64G
-#SBATCH --output=logs/bench_%j.out
-#SBATCH --error=logs/bench_%j.err
+#SBATCH --time=24:00:00
+#SBATCH --output=logs/bench-%j.out
+#SBATCH --error=logs/bench-%j.err
+# 不写 --account / --partition(用默认,跟师兄一致)。qos 默认 normal;若 24h 被拒,
+# 说明 normal 有时限,需要更高 qos(你的 account 目前只有 normal)。
 
 set -euo pipefail
 source /tudelft.net/staff-umbrella/CoReFusion/CoRefusion/server/env_daic.sh
