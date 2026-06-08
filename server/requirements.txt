@@ -1,0 +1,14 @@
+# CoReFusion DreamOn-Java benchmark — packages we pip-install INTO the venv.
+# torch is NOT here: it comes from DAIC's `py-torch/2.5.1` module (built for
+# cuda/12.9) and is visible via the venv's --system-site-packages.
+# transformers 4.57.1 per David's Colab requirement (overrides the older 4.46.2).
+transformers==4.57.1
+accelerate
+huggingface_hub
+tqdm
+einops
+sentencepiece
+protobuf
+omegaconf
+# pandas 仅分析脚本需要（benchmark 本身不 import）；要跑分析就 `module load py-pandas/2.2.3`
+# 或在此取消注释： pandas

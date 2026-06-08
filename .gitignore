@@ -18,3 +18,7 @@ experiments/.DS_Store
 
 # Notebooks (local only)
 notebooks/misc.ipynb
+
+# Server runtime artifacts (large / generated; live on the umbrella share)
+hf_models/
+logs/
