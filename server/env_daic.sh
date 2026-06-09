@@ -4,13 +4,14 @@
 # 必须在每个交互式会话和每个 SLURM job 里 source 一次。
 #
 # WHY: $HOME quota 只有 ~5 MB（DAIC 官方确认），任何写到 $HOME 的 cache 都会爆。
-# 这里把 pip / huggingface / torch / matplotlib / tmp 等 cache 全部重定向到
-# umbrella 共享盘，并按 DAIC 的 Lmod 层级加载 py-torch，再激活 umbrella 上的 venv。
+# 这里把 uv / pip / huggingface / torch / matplotlib / tmp 等 cache 全部重定向到
+# umbrella 共享盘，并激活 umbrella 上由 uv 建好的项目 venv（torch 也由 uv 装，
+# 自带 CUDA 库，所以不再 load DAIC 的 py-torch module）。
 
 # ---- locations -------------------------------------------------------------
 export UMBRELLA="/tudelft.net/staff-umbrella/CoReFusion"
 export PROJECT_DIR="$UMBRELLA/CoRefusion"
-export VENV_DIR="$UMBRELLA/venvs/corefusion"
+export VENV_DIR="$UMBRELLA/venvs/corefusion"     # legacy（uv 之前的 venv，已弃用）
 
 # ---- redirect ALL caches off $HOME ----------------------------------------
 export HF_HOME="$UMBRELLA/hf_cache"                 # huggingface_hub / transformers
@@ -27,36 +28,47 @@ export TMPDIR="$UMBRELLA/tmp"
 export TMP="$TMPDIR"
 export TEMP="$TMPDIR"
 
+# ---- uv: 二进制 + cache + 解释器 + 工具 + 项目 venv 全部放 umbrella -----------
+export UV_INSTALL_DIR="$UMBRELLA/uv/bin"             # uv / uvx 可执行文件
+export UV_CACHE_DIR="$UMBRELLA/uv/cache"            # 下载 + wheel 构建缓存（可能很大）
+export UV_PYTHON_INSTALL_DIR="$UMBRELLA/uv/python"  # uv 自己装的 python 解释器
+export UV_TOOL_DIR="$UMBRELLA/uv/tools"             # `uv tool install` 的隔离环境
+export UV_TOOL_BIN_DIR="$UMBRELLA/uv/bin"           # `uv tool` 暴露的命令入口
+export UV_PROJECT_ENVIRONMENT="$PROJECT_DIR/.venv"  # uv 在仓库根建/用这个 venv
+
 mkdir -p "$HF_HUB_CACHE" "$PIP_CACHE_DIR" "$TORCH_HOME" "$XDG_CACHE_HOME" \
          "$XDG_CONFIG_HOME" "$XDG_DATA_HOME" "$TRITON_CACHE_DIR" \
-         "$MPLCONFIGDIR" "$TMPDIR" 2>/dev/null || true
+         "$MPLCONFIGDIR" "$TMPDIR" "$UV_INSTALL_DIR" "$UV_CACHE_DIR" \
+         "$UV_PYTHON_INSTALL_DIR" "$UV_TOOL_DIR" 2>/dev/null || true
 
-# 私有/受限模型才需要 token；AISE DreamOn 模型是 public，可不设。
+case ":$PATH:" in *":$UMBRELLA/uv/bin:"*) ;; *) export PATH="$UMBRELLA/uv/bin:$PATH" ;; esac
+
+# 私有/受限模型才需要 token；AISE DreamOn 等 public 模型可不设。
 # export HF_TOKEN="hf_xxx"
 
-# ---- DAIC modules (Lmod hierarchy) ----------------------------------------
-# 先加载 GPU base，再加载预编译好的 torch 2.5.1（已含 cuda/12.9）。
-# venv 用 --system-site-packages 创建，所以必须在激活 venv 前加载同一套 module。
-if command -v module >/dev/null 2>&1; then
-    module purge                  2>/dev/null || true
-    module load 2025/gpu          2>/dev/null || true
-    module load py-torch/2.5.1    2>/dev/null || true
-fi
-
-# ---- python env on the umbrella --------------------------------------------
-# 优先用 venv;若 venv 建不出来(NFS 限制),退回 pip --target 的 pylibs 目录。
-# 注意:venv 的 source 必须容错(|| true),否则在 set -e 的 SLURM 脚本里
-# 一旦 activate 不存在会让整个 job 秒退。
-if [ -f "$VENV_DIR/bin/activate" ]; then
+# ---- python env ------------------------------------------------------------
+# 首选 uv 在仓库里建的 .venv（torch 自带 CUDA 库，不 load py-torch module，避免
+# 和 module torch 的 ABI 冲突）。找不到就退回旧的 module-torch + venv/pylibs。
+UV_VENV="$PROJECT_DIR/.venv"
+if [ -f "$UV_VENV/bin/activate" ]; then
     # shellcheck disable=SC1090
-    source "$VENV_DIR/bin/activate" || true
-    echo "[env_daic] python env: venv ($VENV_DIR)"
-elif [ -d "$UMBRELLA/pylibs" ]; then
-    export PYTHONPATH="$UMBRELLA/pylibs:${PYTHONPATH:-}"
-    echo "[env_daic] python env: pylibs ($UMBRELLA/pylibs via PYTHONPATH)"
+    source "$UV_VENV/bin/activate" || true
+    echo "[env_daic] python env: uv venv ($UV_VENV)"
 else
-    echo "[env_daic] WARNING: 没有 venv 也没有 pylibs,只有 module python。" >&2
-    echo "[env_daic] 若 import transformers 失败,先跑一次性安装(见 server/README 或下面命令)。" >&2
+    echo "[env_daic] uv .venv 不存在，退回 legacy module-torch 路径。" >&2
+    echo "[env_daic] 建议在 login 节点跑一次: bash server/setup_uv_daic.sh" >&2
+    if command -v module >/dev/null 2>&1; then
+        module purge               2>/dev/null || true
+        module load 2025/gpu       2>/dev/null || true
+        module load py-torch/2.5.1 2>/dev/null || true
+    fi
+    if [ -f "$VENV_DIR/bin/activate" ]; then
+        source "$VENV_DIR/bin/activate" || true
+        echo "[env_daic] python env: legacy venv ($VENV_DIR)"
+    elif [ -d "$UMBRELLA/pylibs" ]; then
+        export PYTHONPATH="$UMBRELLA/pylibs:${PYTHONPATH:-}"
+        echo "[env_daic] python env: legacy pylibs ($UMBRELLA/pylibs)"
+    fi
 fi
 
 # 进入项目目录（job 里相对路径 data/test.csv 才能找到）。
