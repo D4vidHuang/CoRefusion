@@ -182,8 +182,17 @@ def run_codet5p_large_on_sample(masked_code, model, tokenizer, max_input_tokens)
             outputs = model.generate(**encoding, **gen_kwargs)
 
         # The primed decoder echoes the prefix; only continuation is new.
+        # generate() prepends decoder_start_token_id when decoder_input_ids
+        # don't already start with it, shifting the echo by one -- locate the
+        # echo in the output instead of assuming it sits at position 0.
         prefix_len = encoding["decoder_input_ids"].shape[1]
-        new_token_ids = outputs[0][prefix_len:]
+        out_ids = outputs[0]
+        dec_ids = encoding["decoder_input_ids"][0]
+        start = prefix_len
+        if len(out_ids) > prefix_len and not torch.equal(out_ids[:prefix_len], dec_ids) \
+                and torch.equal(out_ids[1:prefix_len + 1], dec_ids):
+            start = prefix_len + 1
+        new_token_ids = out_ids[start:]
         raw_pred = tokenizer.decode(new_token_ids, skip_special_tokens=False)
         raw_predictions.append(raw_pred)
 
@@ -277,6 +286,25 @@ def load_codet5p_config(checkpoint):
     return config_class(**config_dict)
 
 
+def ensure_generate_compatible(model):
+    """Disarm the legacy generation-config branch in transformers >= 4.50.
+
+    On transformers 4.57, generate() -> _prepare_generation_config() calls
+    config._get_non_default_generation_parameters(), which instantiates
+    `self.__class__()` with no kwargs. CodeT5pConfig *asserts* that encoder/
+    decoder kwargs are present, and transformers only catches ValueError --
+    so every generate() call dies with
+        "Config has to be initialized with encoder and decoder config".
+    That branch is only entered while generation_config still carries the
+    `_from_model_config` flag; clearing the flag skips it entirely. No-op on
+    older transformers where generate() never re-derives the config.
+    """
+    gen_cfg = getattr(model, "generation_config", None)
+    if gen_cfg is not None and getattr(gen_cfg, "_from_model_config", False):
+        gen_cfg._from_model_config = False
+    return model
+
+
 # ---- Main Benchmark --------------------------------------------------------
 
 def run_benchmark(model_name, max_samples=None, hf_repo=None, hf_token=None, debug=False):
@@ -324,6 +352,7 @@ def run_benchmark(model_name, max_samples=None, hf_repo=None, hf_token=None, deb
             trust_remote_code=True,
         ).to(DEVICE)
         model.eval()
+        ensure_generate_compatible(model)
         print(f"  Model loaded in {time.time() - t0:.1f}s")
     except Exception as e:
         print(f"  FAILED to load model: {e}")

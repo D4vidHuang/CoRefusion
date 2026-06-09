@@ -187,6 +187,9 @@ def load_model(meta, hf_token=None):
             hf_id, config=config,
             torch_dtype=torch.float16 if device == "cuda" else torch.float32,
             low_cpu_mem_usage=True, trust_remote_code=True, token=hf_token).to(device)
+        # transformers>=4.50: generate() would re-derive the generation config
+        # from CodeT5pConfig and die on its encoder/decoder assertion.
+        e.ensure_generate_compatible(model)
     else:  # diffusion / dreamon
         from transformers import AutoTokenizer, AutoModel
         tok = AutoTokenizer.from_pretrained(hf_id, trust_remote_code=True, token=hf_token)

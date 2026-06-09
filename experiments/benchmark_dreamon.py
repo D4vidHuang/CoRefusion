@@ -326,8 +326,9 @@ def _run_one_window(model, tokenizer, window_text, num_mask_per_site,
         full = tokenizer.decode(seq, skip_special_tokens=False)
         print(f"  [debug] window_chars={len(window_text)} sites={window_text.count('[MASK]')}")
         print(f"  [debug] preds in window: {preds}")
+        nl_repr = chr(92) + "n"   # literal backslash-n kept OUT of the f-string (py3.11)
         print(f"  [debug] full[:300 with specials]: "
-              f"{full[:300].replace(chr(10), '\\n')}")
+              f"{full[:300].replace(chr(10), nl_repr)}")
     return preds
 
 
