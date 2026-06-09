@@ -80,6 +80,13 @@ JUDGE_REGISTRY = {
     "Mistral-7B-Instruct":   "mistralai/Mistral-7B-Instruct-v0.3",
     "Gemma-2-9B-It":         "google/gemma-2-9b-it",
     "Llama-3.1-8B-Instruct": "meta-llama/Meta-Llama-3.1-8B-Instruct",
+    # ---- larger judges: bf16 weights need a >=80 GB card (RTX PRO 6000 96GB).
+    # ---- 24B+ do NOT fit the 48 GB A40; request the big card explicitly.
+    "Phi-4":                 "microsoft/phi-4",                            # 14B ~28 GB, MIT
+    "Mistral-Small-24B":     "mistralai/Mistral-Small-24B-Instruct-2501",  # 24B ~47 GB, Apache-2.0
+    "Gemma-2-27B-It":        "google/gemma-2-27b-it",                      # 27B ~54 GB, gated -> HF_TOKEN
+    "Qwen2.5-32B-Instruct":  "Qwen/Qwen2.5-32B-Instruct",                  # 32B ~65 GB
+    "Qwen3-32B":             "Qwen/Qwen3-32B",                             # 32B ~65 GB, thinking disabled
 }
 DEFAULT_JUDGE = "Qwen2.5-7B-Instruct"
 
@@ -220,7 +227,14 @@ def load_judge(model_id: str):
 
 
 def _apply_chat_template(tokenizer, system: str, user: str) -> str:
-    """Apply chat template; fall back to a plain format if unavailable."""
+    """Apply chat template; fall back to a plain format if unavailable.
+
+    enable_thinking=False forces Qwen3-style judges into non-thinking mode
+    (otherwise the 32-token budget is spent inside <think> and the VERDICT
+    line never appears); other templates simply ignore the extra variable.
+    Gemma-2 templates reject the system role, so retry with the system
+    prompt merged into the user turn before falling back to plain text.
+    """
     messages = [
         {"role": "system", "content": system},
         {"role": "user",   "content": user},
@@ -230,6 +244,17 @@ def _apply_chat_template(tokenizer, system: str, user: str) -> str:
             messages,
             tokenize=False,
             add_generation_prompt=True,
+            enable_thinking=False,
+        )
+    except Exception:
+        pass
+    try:
+        merged = [{"role": "user", "content": system + "\n\n" + user}]
+        return tokenizer.apply_chat_template(
+            merged,
+            tokenize=False,
+            add_generation_prompt=True,
+            enable_thinking=False,
         )
     except Exception:
         # Fallback for models without a chat template
@@ -680,9 +705,10 @@ def main():
         all_summaries.append(summary)
 
     # Save aggregate summary
+    safe_judge = re.sub(r"[/\\]", "_", judge_name)
     summary_path = os.path.join(
         args.results_dir,
-        f"summary_judge_{re.sub(r'[/\\]', '_', judge_name)}_"
+        f"summary_judge_{safe_judge}_"
         f"{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
     )
     if all_summaries:

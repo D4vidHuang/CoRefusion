@@ -20,6 +20,14 @@
 #   sbatch server/run_llm_judge.slurm --judge-model Qwen2.5-14B-Instruct
 #   sbatch server/run_llm_judge.slurm --resume                   # 断点续判
 # 脚本名后的参数原样透传给 run_llm_judge_unified.py。
+#
+# 多尺寸 judge（--judge-model 可重复，单 job 内顺序加载/卸载）：
+#   sbatch server/run_llm_judge.slurm --judge-model Qwen2.5-7B-Instruct \
+#          --judge-model Qwen2.5-14B-Instruct --judge-model Qwen2.5-32B-Instruct
+# 大 judge（24B/27B/32B，bf16 47-65GB）放不进 48GB A40，要指定 96GB 卡，如：
+#   sbatch --gres=gpu:<GRES型名>:1 server/run_llm_judge.slurm --judge-model Qwen2.5-32B-Instruct
+#   （GRES 型名用  sinfo -o "%N %G" | grep -i 6000  查询）
+# 一卡一 judge 并行 + 事后合并：bash server/jobs/judge_multi_size.sh
 set -euo pipefail
 source /tudelft.net/staff-umbrella/CoReFusion/CoRefusion/server/env_daic.sh
 mkdir -p logs
