@@ -33,7 +33,7 @@ Qwen2.5-Coder-1.5B|1|32G|06:00:00|0
 CodeGemma-7B|1|48G|12:00:00|1
 CodeGemma-2B|1|32G|08:00:00|1
 CodeT5p-16B|1|96G|30:00:00|0
-CodeT5p-6B|1|48G|10:00:00|0
+CodeT5p-6B|1|48G|16:00:00|0
 CodeT5p-2B|1|32G|08:00:00|0
 CodeT5-large|1|24G|04:00:00|0
 CodeT5-base|1|24G|04:00:00|0

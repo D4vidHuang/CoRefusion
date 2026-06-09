@@ -5,7 +5,7 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=48G
-#SBATCH --time=10:00:00
+#SBATCH --time=16:00:00
 #SBATCH --output=logs/CodeT5p-6B-%j.out
 #SBATCH --error=logs/CodeT5p-6B-%j.err
 # 单模型 refineID 推理 + 全site一致性门控指标；结果统一写 results/unified_refineID/。

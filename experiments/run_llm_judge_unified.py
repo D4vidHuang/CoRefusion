@@ -265,7 +265,8 @@ def main():
 
     # leaderboard
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    lead = os.path.join(OUT_DIR, f"judge_leaderboard_{re.sub(r'[/\\]', '_', judge_name)}_{ts}.csv")
+    safe_judge = re.sub(r"[/\\]", "_", judge_name)
+    lead = os.path.join(OUT_DIR, f"judge_leaderboard_{safe_judge}_{ts}.csv")
     summaries.sort(key=lambda s: s["judge_acc_gated"], reverse=True)
     with open(lead, "w", newline="", encoding="utf-8") as f:
         wr = csv.DictWriter(f, fieldnames=LEAD_COLS, extrasaction="ignore")
