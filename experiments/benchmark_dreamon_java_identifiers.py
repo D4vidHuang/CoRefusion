@@ -46,17 +46,45 @@ Metrics (per sample; all [MASK] in a sample refer to the SAME variable)
   all_correct_acc     STRICT EM: ALL sites equal ground truth               -- NEW
                       (== consistent AND the agreed name is correct)
 
-Usage on Colab / DelftBlue:
-    pip install transformers==4.46.2 torch==2.5.1 accelerate omegaconf tqdm \
-                pandas huggingface_hub
-    # smoke test (5 samples, both models, prints per-window debug):
-    python experiments/benchmark_dreamon_java_identifiers.py --max-samples 5 --debug
-    # single model:
-    python experiments/benchmark_dreamon_java_identifiers.py --model dreamon-7b-Java
-    python experiments/benchmark_dreamon_java_identifiers.py --model dreamon-0.5b-Java
-    # full 1000-sample set, both models, upload to HF:
+Mask-token pattern of the fine-tuned checkpoints (--mask-style)
+---------------------------------------------------------------
+The Java-Identifier fine-tunes were trained with the site placeholder
+``__MASKED_VAR__``. It is LITERAL TEXT, not a tokenizer special token (both
+repos still register <|mask|> as the only mask token, and diffusion can only
+denoise <|mask|> positions), so the placeholder must enter the prompt at the
+data level. The exact training layout is not recorded in the model repos
+(empty model cards), so BOTH plausible layouts are implemented:
+
+  --mask-style canvas       (default) every [MASK] site becomes a <|mask|>
+                            canvas of length len(tokenize("__MASKED_VAR__"))
+                            -- assumes training masked the placeholder's
+                            token positions in place, so the canvas length
+                            prior matches the fine-tuning distribution.
+  --mask-style placeholder  the FIRST site of each window is the <|mask|>
+                            canvas; every OTHER site shows the literal
+                            __MASKED_VAR__ text as co-reference context.
+                            The window's single prediction is assigned to
+                            all of its sites.
+  --mask-style legacy       the original benchmark behaviour (k=4 dreamon /
+                            k=2 dream canvas at every site), to reproduce /
+                            compare with the Jun-07 runs.
+
+Input data may mark sites with either ``[MASK]`` (our test.csv) or
+``__MASKED_VAR__`` (the fine-tuning convention); both are accepted.
+
+Pick the style empirically: run both with --max-samples 20 --debug, keep the
+one whose predictions look sane, then do the full run.
+
+Usage on DAIC:
+    # smoke test, both styles (per model):
     python experiments/benchmark_dreamon_java_identifiers.py \
-        --hf-repo D4vidHuang/benchmark_ReFineID_DreamOn_Java
+        --model dreamon-7b-Java --mask-style canvas --max-samples 20 --debug
+    python experiments/benchmark_dreamon_java_identifiers.py \
+        --model dreamon-7b-Java --mask-style placeholder --max-samples 20 --debug
+    # full 1000-sample set, both models, chosen style:
+    python experiments/benchmark_dreamon_java_identifiers.py --mask-style canvas
+    # old behaviour:
+    python experiments/benchmark_dreamon_java_identifiers.py --mask-style legacy
 """
 
 import os
@@ -108,8 +136,14 @@ DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 CONTEXT_CHARS = 3000
 MAX_SITES_IN_WINDOW = 8
 
-# Per-mode initial mask-token count per [MASK] site.
+# Per-mode initial mask-token count per [MASK] site (legacy style only).
 NUM_MASK_PER_SITE = {"dreamon": 4, "dream": 2}
+
+# Literal site placeholder used in the Java-Identifier fine-tuning data.
+# NOT a tokenizer special token -- it BPE-tokenizes into ~5 normal pieces.
+# canvas style: per-site canvas length = len(tokenize(MASK_PLACEHOLDER)).
+# placeholder style: non-first sites show this text verbatim as context.
+MASK_PLACEHOLDER = "__MASKED_VAR__"
 # DreamOn: max canvas size after <|expand|> growth (must be >= num_mask).
 DREAMON_MAX_NEW_TOKENS = 64
 # Fixed-length diffusion steps for the 0.5B "dream" backend.
@@ -229,6 +263,14 @@ def extract_idents_by_anchor(full_text, window_text):
     return preds
 
 
+def window_with_placeholders(window_text, placeholder):
+    """placeholder style: keep ONE [MASK] (the first site) as the canvas
+    marker and render every other site as the literal placeholder text, so
+    the model sees where the variable recurs without extra canvases."""
+    parts = window_text.split("[MASK]")
+    return parts[0] + "[MASK]" + placeholder.join(parts[1:])
+
+
 # ---- DreamOn (variable-length) backend -------------------------------------
 
 def build_dreamon_prompt(window_text, tokenizer, num_mask_per_site):
@@ -292,22 +334,32 @@ def run_window_dream(model, tokenizer, window_text, num_mask_per_site,
 # ---- Per-sample prediction (tile + dispatch) -------------------------------
 
 def predict_one(model, tokenizer, masked_code, gen_mode, num_mask_per_site,
-                context_chars, max_sites, max_new_tokens, steps, debug=False):
+                context_chars, max_sites, max_new_tokens, steps,
+                mask_style="legacy", placeholder=MASK_PLACEHOLDER, debug=False):
     n_total = masked_code.count("[MASK]")
     if n_total == 0:
         return [], 0
     windows = tile_windows(masked_code, target_chars=context_chars, max_sites=max_sites)
     site_preds = [""] * n_total
     for w_idx, (win_text, global_indices) in enumerate(windows):
+        win_for_model = win_text
+        if mask_style == "placeholder":
+            # one canvas (first site) + literal placeholder at the others
+            win_for_model = window_with_placeholders(win_text, placeholder)
         if gen_mode == "dreamon":
             preds = run_window_dreamon(
-                model, tokenizer, win_text, num_mask_per_site,
+                model, tokenizer, win_for_model, num_mask_per_site,
                 max_new_tokens, DREAMON_GEN_KWARGS, debug=(debug and w_idx == 0))
         else:
             preds = run_window_dream(
-                model, tokenizer, win_text, num_mask_per_site,
+                model, tokenizer, win_for_model, num_mask_per_site,
                 steps, {k: v for k, v in DREAM_GEN_KWARGS.items() if k != "steps"},
                 debug=(debug and w_idx == 0))
+        if mask_style == "placeholder":
+            # the window has a single canvas -> its prediction names ALL
+            # co-referent sites of this window
+            one = preds[0] if preds else ""
+            preds = [one] * len(global_indices)
         for local_i, gi in enumerate(global_indices):
             site_preds[gi] = preds[local_i] if local_i < len(preds) else ""
     return site_preds, len(windows)
@@ -324,7 +376,12 @@ def load_data(data_path, max_samples=None):
                 break
             if len(row) < 3:
                 continue
-            rows.append({"id": row[0], "masked_code": row[1], "target": row[2].strip()})
+            code = row[1]
+            # Accept either site marker: our test.csv uses [MASK]; the
+            # fine-tuning data convention marks sites with __MASKED_VAR__.
+            if MASK_PLACEHOLDER in code:
+                code = code.replace(MASK_PLACEHOLDER, "[MASK]")
+            rows.append({"id": row[0], "masked_code": code, "target": row[2].strip()})
     return rows
 
 
@@ -399,20 +456,30 @@ def upload_to_hf(file_path, repo_id, token, path_in_repo=None):
 
 def run_one_model(key, meta, data, args, timestamp):
     print(f"\n{'='*64}\n  Model: {meta['label']}  ({meta['id']})")
-    print(f"  gen_mode={meta['gen_mode']}  code_repo={meta.get('code_repo')}\n{'='*64}")
+    print(f"  gen_mode={meta['gen_mode']}  mask_style={args.mask_style}  "
+          f"code_repo={meta.get('code_repo')}\n{'='*64}")
     t0 = time.time()
     tokenizer, model = load_model(meta, hf_token=args.hf_token)
     print(f"  loaded in {time.time()-t0:.1f}s")
 
     gen_mode = meta["gen_mode"]
-    num_mask = args.num_mask_per_site or NUM_MASK_PER_SITE[gen_mode]
+    if args.num_mask_per_site:
+        num_mask = args.num_mask_per_site
+    elif args.mask_style in ("canvas", "placeholder"):
+        # canvas length prior = token length of the fine-tuning placeholder
+        num_mask = len(tokenizer.encode(args.mask_pattern, add_special_tokens=False))
+        print(f"  canvas/site = len(tokenize({args.mask_pattern!r})) = {num_mask} tokens")
+    else:
+        num_mask = NUM_MASK_PER_SITE[gen_mode]
 
     if args.debug:
         print("\n[sanity] tiny infill: 'return a + [MASK];'")
         sp, nw = predict_one(model, tokenizer,
                              "public int add(int a, int b) {\n    return a + [MASK];\n}\n",
                              gen_mode, num_mask, 10000, args.max_sites,
-                             args.max_new_tokens, args.steps, debug=True)
+                             args.max_new_tokens, args.steps,
+                             mask_style=args.mask_style,
+                             placeholder=args.mask_pattern, debug=True)
         print(f"[sanity] preds={sp} (any of a/b/1 is fine)\n")
 
     site_rows, sample_rows = [], []
@@ -427,7 +494,8 @@ def run_one_model(key, meta, data, args, timestamp):
             site_preds, n_windows = predict_one(
                 model, tokenizer, masked_code, gen_mode, num_mask,
                 args.context_chars, args.max_sites, args.max_new_tokens,
-                args.steps, debug=(args.debug and idx < 2))
+                args.steps, mask_style=args.mask_style,
+                placeholder=args.mask_pattern, debug=(args.debug and idx < 2))
 
             for s_idx, pred in enumerate(site_preds):
                 is_c = (pred == gt)
@@ -481,7 +549,7 @@ def run_one_model(key, meta, data, args, timestamp):
                 print(f"  Error on {item_id}: {e}")
 
     # ---- Save ----------------------------------------------------------
-    safe = meta["label"]
+    safe = f"{meta['label']}_style-{args.mask_style}"
     site_file = os.path.join(RESULTS_DIR, f"{safe}_per_site_{timestamp}.csv")
     sample_file = os.path.join(RESULTS_DIR, f"{safe}_per_sample_{timestamp}.csv")
 
@@ -504,7 +572,8 @@ def run_one_model(key, meta, data, args, timestamp):
 
     n = len(data)
     site_acc = site_correct / site_total if site_total else 0.0
-    print(f"\n=== {meta['label']} (tiled, all-site coverage, gen_mode={gen_mode}) ===")
+    print(f"\n=== {meta['label']} (tiled, all-site coverage, gen_mode={gen_mode}, "
+          f"mask_style={args.mask_style}) ===")
     print(f"Site-level EM            : {site_correct}/{site_total} = {site_acc:.2%}")
     print(f"First-mask EM            : {n_first}/{n} = {n_first/n:.2%}")
     print(f"Majority-vote EM         : {n_majority}/{n} = {n_majority/n:.2%}")
@@ -517,6 +586,7 @@ def run_one_model(key, meta, data, args, timestamp):
 
     summary = {
         "model": meta["label"], "hf_id": meta["id"], "gen_mode": gen_mode,
+        "mask_style": args.mask_style, "mask_pattern": args.mask_pattern,
         "samples": n, "errors": errors,
         "site_acc": f"{site_acc:.4f}", "site_correct": site_correct, "site_total": site_total,
         "first_mask_acc": f"{n_first/n:.4f}",
@@ -549,8 +619,20 @@ def main():
                    help=f"One or more of {list(MODEL_REGISTRY)}. Default: both.")
     p.add_argument("--data-path", default=DATA_PATH)
     p.add_argument("--max-samples", type=int, default=None)
+    p.add_argument("--mask-style", choices=["canvas", "placeholder", "legacy"],
+                   default="canvas",
+                   help="How [MASK] sites are presented to the fine-tuned model: "
+                        "canvas = <|mask|> run sized by tokenize(__MASKED_VAR__) at "
+                        "EVERY site (default); placeholder = canvas at the FIRST "
+                        "site per window, literal __MASKED_VAR__ text at the rest; "
+                        "legacy = original k=4/k=2 canvases (Jun-07 behaviour).")
+    p.add_argument("--mask-pattern", default=MASK_PLACEHOLDER,
+                   help="Literal site placeholder used in fine-tuning (default "
+                        f"{MASK_PLACEHOLDER!r}). Sets the canvas length prior and "
+                        "the context placeholder text.")
     p.add_argument("--num-mask-per-site", type=int, default=None,
-                   help="Override initial mask tokens per site (default 4 dreamon / 2 dream).")
+                   help="Hard override of mask tokens per site (bypasses the "
+                        "mask-style sizing; legacy defaults are 4 dreamon / 2 dream).")
     p.add_argument("--context-chars", type=int, default=CONTEXT_CHARS)
     p.add_argument("--max-sites", type=int, default=MAX_SITES_IN_WINDOW)
     p.add_argument("--max-new-tokens", type=int, default=DREAMON_MAX_NEW_TOKENS,
