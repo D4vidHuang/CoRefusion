@@ -550,6 +550,8 @@ def run_one_model(key, meta, data, args, timestamp):
 
     # ---- Save ----------------------------------------------------------
     safe = f"{meta['label']}_style-{args.mask_style}"
+    if args.start:
+        safe += f"_start{args.start}"
     site_file = os.path.join(RESULTS_DIR, f"{safe}_per_site_{timestamp}.csv")
     sample_file = os.path.join(RESULTS_DIR, f"{safe}_per_sample_{timestamp}.csv")
 
@@ -597,6 +599,8 @@ def run_one_model(key, meta, data, args, timestamp):
         "num_mask_per_site": num_mask, "context_chars": args.context_chars,
         "max_sites": args.max_sites,
         "max_new_tokens": args.max_new_tokens, "steps": args.steps,
+        "start": args.start,
+        "gen_kwargs": str(DREAMON_GEN_KWARGS if gen_mode == "dreamon" else DREAM_GEN_KWARGS),
         "site_file": site_file, "sample_file": sample_file,
     }
 
@@ -638,7 +642,20 @@ def main():
     p.add_argument("--max-new-tokens", type=int, default=DREAMON_MAX_NEW_TOKENS,
                    help="DreamOn canvas size after <|expand|> (dreamon mode).")
     p.add_argument("--steps", type=int, default=DREAM_STEPS,
-                   help="Fixed-length diffusion steps (dream mode).")
+                   help="Fixed-length diffusion steps (dream mode). The 0.5B "
+                        "checkpoint's own generation_config says 512.")
+    p.add_argument("--alg", choices=["entropy", "origin", "maskgit_plus", "topk_margin"],
+                   default=None,
+                   help="Override the denoising algorithm for BOTH gen modes "
+                        "(0.5B's own generation_config says 'origin').")
+    p.add_argument("--temperature", type=float, default=None,
+                   help="Override sampling temperature (0.5B's own config says 0).")
+    p.add_argument("--top-p", type=float, default=None,
+                   help="Override nucleus top_p.")
+    p.add_argument("--start", type=int, default=0,
+                   help="Skip the first N samples (chunked runs on Colab: "
+                        "--start 0/250/500/750 with --max-samples 250; "
+                        "merge the chunk CSVs afterwards).")
     p.add_argument("--debug", action="store_true")
     p.add_argument("--hf-repo", default=None)
     p.add_argument("--hf-token", default=os.environ.get("HF_TOKEN"))
@@ -655,10 +672,25 @@ def main():
         if k not in MODEL_REGISTRY:
             sys.exit(f"Unknown model '{k}'. Available: {list(MODEL_REGISTRY)}")
 
+    # Apply sampling overrides to both gen-mode recipes.
+    for kw in (DREAMON_GEN_KWARGS, DREAM_GEN_KWARGS):
+        if args.alg:
+            kw["alg"] = args.alg
+        if args.temperature is not None:
+            kw["temperature"] = args.temperature
+        if args.top_p is not None:
+            kw["top_p"] = args.top_p
+    if args.alg or args.temperature is not None or args.top_p is not None:
+        print(f"Sampling overrides -> dreamon={DREAMON_GEN_KWARGS} dream={DREAM_GEN_KWARGS}")
+
     os.makedirs(RESULTS_DIR, exist_ok=True)
     print(f"Loading data from {args.data_path} ...")
-    data = load_data(args.data_path, max_samples=args.max_samples)
-    print(f"Loaded {len(data)} samples on device={DEVICE}.")
+    data = load_data(args.data_path)
+    if args.start:
+        data = data[args.start:]
+    if args.max_samples is not None:
+        data = data[:args.max_samples]
+    print(f"Loaded {len(data)} samples (start={args.start}) on device={DEVICE}.")
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     summaries = [run_one_model(k, MODEL_REGISTRY[k], data, args, timestamp) for k in keys]
