@@ -74,7 +74,16 @@ def load_diffusiongemma(hf_id=MODEL_ID, hf_token=None):
                 "Install a newer transformers into a SEPARATE dir (do not "
                 "touch the Dream/DreamOn-pinned pylibs): "
                 "bash server/setup_dgemma_pylibs.sh")
-    processor = AutoProcessor.from_pretrained(hf_id, token=hf_token)
+    try:
+        processor = AutoProcessor.from_pretrained(hf_id, token=hf_token)
+    except ImportError as ex:
+        # Gemma4Processor's image processor hard-imports torchvision (tfm 5.x).
+        # refineID is text-only: the tokenizer carries the same chat template,
+        # so fall back instead of dragging torchvision into the env.
+        from transformers import AutoTokenizer
+        print("AutoProcessor unavailable (" + str(ex)[:120]
+              + ") -> text-only AutoTokenizer fallback")
+        processor = AutoTokenizer.from_pretrained(hf_id, token=hf_token)
     model = Cls.from_pretrained(
         hf_id, dtype="auto", device_map="auto", token=hf_token)
     model.eval()

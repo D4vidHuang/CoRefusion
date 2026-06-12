@@ -39,11 +39,30 @@ fi
 # 与主 pylibs 同样的约定：删掉自带 numpy，用 venv 的 numpy（torch 按它编译）。
 rm -rf "$DEST"/numpy "$DEST"/numpy-* "$DEST"/numpy.libs 2>/dev/null || true
 
+# torchvision（Gemma4 图像处理器要它；纯文本不装也行，代码会回退 AutoTokenizer）。
+# 版本要和 venv 的 torch 配对（0.X = torch minor + 15），且从同一 cu 索引装，
+# --no-deps 防止拖进第二份 torch 经 PYTHONPATH 盖住 venv 的 cu130 版。
+read -r TV_VER TORCH_CU <<<"$(python -c "import torch; v=torch.__version__; print('0.%d' % (int(v.split('.')[1])+15), (v.split('+')[1] if '+' in v else 'none'))")"
+TV_IDX=()
+case "$TORCH_CU" in cu*) TV_IDX=(--index-url "https://download.pytorch.org/whl/${TORCH_CU}");; esac
+if command -v uv >/dev/null 2>&1; then
+  uv pip install --no-cache --target "$DEST" --no-deps "${TV_IDX[@]}" "torchvision==${TV_VER}.*" \
+    || echo "WARN: torchvision==${TV_VER}.* 装不上，跳过（纯文本 fallback 不受影响）"
+else
+  python -m pip install --no-cache-dir --target "$DEST" --no-deps "${TV_IDX[@]}" "torchvision==${TV_VER}.*" \
+    || echo "WARN: torchvision==${TV_VER}.* 装不上，跳过（纯文本 fallback 不受影响）"
+fi
+
 PYTHONPATH="$DEST" python - <<'EOF'
 import transformers, importlib
 print("transformers", transformers.__version__, "@", transformers.__file__)
 importlib.import_module("transformers.models.diffusion_gemma")
 print("OK: diffusion_gemma architecture available")
+try:
+    import torchvision
+    print("torchvision", torchvision.__version__, "OK (AutoProcessor usable)")
+except Exception as ex:
+    print("torchvision unavailable (%s) -> AutoTokenizer text-only fallback" % str(ex)[:80])
 EOF
 
 # 模型公开（Apache 2.0，不 gated），无需 HF_TOKEN。
