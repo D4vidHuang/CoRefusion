@@ -380,6 +380,11 @@ def evaluate_predictions(
         'predicted_obfuscated_rate': obf_rate,
         'originals': {orig: info['obfuscated'] for orig, info in groups.items()},
         'majority_predictions': majority_predictions,
+        # RAW per-site predictions per identifier group, in site order. Needed
+        # for the all-sites-consistency metric (analysis/identifier_similarity_
+        # metrics.eval_sample): an identifier is "consistent" only if every site
+        # emits the SAME non-empty name. Empties are kept on purpose.
+        'group_site_predictions': {orig: info['predictions'] for orig, info in groups.items()},
     }
 
 
@@ -621,6 +626,7 @@ def run_experiment(target_models=None, max_samples=None, hf_repo=None, hf_token=
                         "meaningful_rate": f"{metrics['meaningful_rate']:.4f}",
                         "predicted_obfuscated_rate": f"{metrics['predicted_obfuscated_rate']:.4f}",
                         "predictions_json": json.dumps(metrics['majority_predictions']),
+                        "site_predictions_json": json.dumps(metrics.get('group_site_predictions', {})),
                         "originals_json": json.dumps(metrics['originals']),
                         "mapping_json": json.dumps(obfuscation_map),
                         "token_length": metrics.get('token_length', 0),
@@ -676,6 +682,7 @@ def run_experiment(target_models=None, max_samples=None, hf_repo=None, hf_token=
                     "meaningful_rate": f"{metrics['meaningful_rate']:.4f}",
                     "predicted_obfuscated_rate": f"{metrics['predicted_obfuscated_rate']:.4f}",
                     "predictions_json": json.dumps(metrics['majority_predictions']),
+                    "site_predictions_json": json.dumps(metrics.get('group_site_predictions', {})),
                     "originals_json": json.dumps(metrics['originals']),
                     "mapping_json": json.dumps(obfuscation_map),
                     "token_length": input_ids.shape[1],
