@@ -1,10 +1,13 @@
 #!/bin/bash
 # 一次性安装 DiffusionGemma 专用 python 库（DAIC login 节点执行）。
 #
-# 为什么单独一棵树：diffusion_gemma 架构只在最新 transformers 里有，而
-# $UMBRELLA/pylibs 钉死 transformers==4.57.1 给 Dream/DreamOn 的自定义代码用，
-# 不能升级。所以装到 $UMBRELLA/pylibs_dgemma，只在 DiffusionGemma 的 job 里
-# 把它 PREPEND 到 PYTHONPATH（先于旧 pylibs，新 transformers 生效）。
+# 为什么单独一棵树：diffusion_gemma 架构 transformers>=5.11.0 才有（5.10.x 没有），
+# 而主环境钉死 4.57.1 给 Dream/DreamOn 的自定义代码用，不能升级。所以装到
+# $UMBRELLA/pylibs_dgemma，只在 DiffusionGemma 的 job 里把它 PREPEND 到
+# PYTHONPATH（PYTHONPATH 先于 venv site-packages，新 transformers 生效）。
+#
+# 坑（269763 踩过）：env_daic.sh 现在激活 uv venv，而 `uv venv` 默认不带 pip，
+# 裸 `pip` 命令会直接挂 → 这里优先用 `uv pip`，回退 `python -m pip`。
 #
 # 用法：
 #   cd /tudelft.net/staff-umbrella/CoReFusion/CoRefusion
@@ -14,27 +17,33 @@ set -euo pipefail
 source "$(dirname "$0")/env_daic.sh"
 
 DEST="$UMBRELLA/pylibs_dgemma"
+TFM_VER="5.11.0"   # 第一个含 diffusion_gemma 的 release（2026-06-10）
+
+# 清掉上次失败留下的半成品/空目录，从干净状态装。
+rm -rf "$DEST"
 mkdir -p "$DEST"
 
-# torch 不装（用运行时已有的 2.12+cu130）；accelerate 给 device_map="auto"；
-# pillow 是 AutoProcessor（多模态）import 需要。
-pip install --no-cache-dir --target "$DEST" -U \
-    transformers accelerate huggingface_hub tokenizers safetensors pillow \
-    tqdm sentencepiece protobuf
+# torch 不装（用 venv 里已有的 2.12+cu130）；accelerate 给 device_map="auto"；
+# pillow 是 AutoProcessor（多模态）import 需要；其余依赖让 transformers 自己拉。
+PKGS=("transformers==${TFM_VER}" accelerate pillow tqdm sentencepiece protobuf)
+if command -v uv >/dev/null 2>&1; then
+  uv pip install --no-cache --target "$DEST" "${PKGS[@]}"
+elif python -m pip --version >/dev/null 2>&1; then
+  python -m pip install --no-cache-dir --target "$DEST" "${PKGS[@]}"
+else
+  echo "FATAL: 既没有 uv 也没有 pip（uv venv 默认无 pip）。" >&2
+  echo "  装一个：curl -LsSf https://astral.sh/uv/install.sh | sh" >&2
+  exit 1
+fi
 
-# 与主 pylibs 同样的约定：删掉自带 numpy，用 module 的 numpy（避免 ABI 冲突）。
+# 与主 pylibs 同样的约定：删掉自带 numpy，用 venv 的 numpy（torch 按它编译）。
 rm -rf "$DEST"/numpy "$DEST"/numpy-* "$DEST"/numpy.libs 2>/dev/null || true
 
 PYTHONPATH="$DEST" python - <<'EOF'
 import transformers, importlib
-print("transformers", transformers.__version__)
-try:
-    importlib.import_module("transformers.models.diffusion_gemma")
-    print("OK: diffusion_gemma architecture available")
-except Exception as ex:
-    raise SystemExit(
-        "FAIL: this transformers has no diffusion_gemma (%s). "
-        "Try: pip install --target ... git+https://github.com/huggingface/transformers" % ex)
+print("transformers", transformers.__version__, "@", transformers.__file__)
+importlib.import_module("transformers.models.diffusion_gemma")
+print("OK: diffusion_gemma architecture available")
 EOF
 
 # 模型公开（Apache 2.0，不 gated），无需 HF_TOKEN。

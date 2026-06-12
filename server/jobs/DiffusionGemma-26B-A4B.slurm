@@ -23,13 +23,25 @@ source /tudelft.net/staff-umbrella/CoReFusion/CoRefusion/server/env_daic.sh
 mkdir -p logs
 MODEL="DiffusionGemma-26B-A4B"
 
-# 新 transformers 树 PREPEND（先于 Dream/DreamOn 钉死的 4.57.1 pylibs）。
+# 新 transformers 树 PREPEND（先于主环境钉死的 4.57.1）。
+# 检查实际内容而非目录存在——setup 失败会留下空目录（269763 的教训）。
 DGEMMA_LIBS="$UMBRELLA/pylibs_dgemma"
-if [ ! -d "$DGEMMA_LIBS" ]; then
-  echo "FATAL: $DGEMMA_LIBS 不存在，先跑 bash server/setup_dgemma_pylibs.sh" >&2
+if [ ! -d "$DGEMMA_LIBS/transformers" ]; then
+  echo "FATAL: $DGEMMA_LIBS 缺 transformers（目录空=上次 setup 失败）。" >&2
+  echo "  先跑：bash server/setup_dgemma_pylibs.sh" >&2
   exit 1
 fi
 export PYTHONPATH="$DGEMMA_LIBS${PYTHONPATH:+:$PYTHONPATH}"
+
+# VRAM 闸门：bf16 权重 ~52GB，46GB 的 L40/A40 必 OOM。在下载/加载权重之前
+# 快速失败，而不是 20 分钟后 CUDA OOM。
+VRAM_MB=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits | head -1 | tr -d ' ')
+if [ "${VRAM_MB:-0}" -lt 90000 ]; then
+  echo "FATAL: 本节点 GPU 只有 ${VRAM_MB:-?}MiB，需要 96GB 卡（RTX PRO 6000）。" >&2
+  echo "  查型名：sinfo -o \"%N %G\" | grep -iE \"6000|pro\"" >&2
+  echo "  再提交：sbatch --gres=gpu:<型名>:1 server/jobs/DiffusionGemma-26B-A4B.slurm" >&2
+  exit 1
+fi
 
 # M3 质量指标要词典；没有就让 runner 回退内置缩写表（不报错，质量分偏低）。
 DICT_ARG=""
@@ -39,8 +51,8 @@ done
 
 echo "=== node:$(hostname) job:${SLURM_JOB_ID:-NA} model:${MODEL} ==="
 nvidia-smi || true
-python -c "import torch,transformers; print('torch',torch.__version__,'| tfm',transformers.__version__,'| cuda',torch.cuda.is_available())"
-# 架构可用性探针：失败说明 PYTHONPATH 没吃到新 transformers
+python -c "import torch,transformers; print('torch',torch.__version__,'| tfm',transformers.__version__,'@',transformers.__file__,'| cuda',torch.cuda.is_available())"
+# 架构可用性探针：失败说明 PYTHONPATH 没吃到新 transformers（需要 >=5.11.0）
 python -c "import importlib; importlib.import_module('transformers.models.diffusion_gemma'); print('diffusion_gemma OK')"
 
 srun python experiments/run_all_refineID_unified.py --only "${MODEL}" ${DICT_ARG} "$@"
