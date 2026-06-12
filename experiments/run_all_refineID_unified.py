@@ -22,6 +22,7 @@ scripts so the numbers stay consistent with the paper:
     codet5p   -> benchmark_codet5p_16b.run_codet5p_large_on_sample
     diffusion -> benchmark_diffusion_models.extract_all_predictions (+ inline fwd)
     dreamon   -> benchmark_dreamon.predict_one
+    dgemma    -> benchmark_diffusiongemma.run_dgemma_on_sample (prompted per-site)
 
 Consistency = HARD GATE: a sample is usable only if every [MASK] site emits the
 SAME non-empty identifier (else the renamed code won't compile). Metrics score
@@ -89,6 +90,10 @@ REG = {
     # --- dLLM variable-canvas (tiled all-site DreamOn) ---------------------
     "DreamOn-7B": dict(engine="dreamon", arch="dLLM (variable canvas)", params="7B",
                        id="Dream-org/DreamOn-v0-7B"),
+    # --- dLLM block-AR (canvas appended after prompt; prompted per-site fill,
+    #     NOT in-place infill -- footnote the protocol difference) ----------
+    "DiffusionGemma-26B-A4B": dict(engine="dgemma", arch="dLLM (block-AR)", params="26B-A4B",
+                                   id="google/diffusiongemma-26B-A4B-it", max_ctx=16384),
     # --- Decoder-only (FIM) ------------------------------------------------
     "CodeLlama-13B": dict(engine="fim", arch="Decoder-only", params="13B",
                           id="codellama/CodeLlama-13b-hf", model_type="codellama", max_ctx=16384),
@@ -147,6 +152,8 @@ def _engine(name):
             import benchmark_diffusion_models as m
         elif name == "dreamon":
             import benchmark_dreamon as m
+        elif name == "dgemma":
+            import benchmark_diffusiongemma as m
         else:
             raise ValueError(name)
         _ENGINE_CACHE[name] = m
@@ -190,6 +197,10 @@ def load_model(meta, hf_token=None):
         # transformers>=4.50: generate() would re-derive the generation config
         # from CodeT5pConfig and die on its encoder/decoder assertion.
         e.ensure_generate_compatible(model)
+    elif eng == "dgemma":
+        # AutoProcessor stands in for tok; needs transformers w/ diffusion_gemma
+        # (pylibs_dgemma on DAIC, NOT the 4.57.1 Dream/DreamOn tree).
+        tok, model = _engine("dgemma").load_diffusiongemma(hf_id, hf_token=hf_token)
     else:  # diffusion / dreamon
         from transformers import AutoTokenizer, AutoModel
         tok = AutoTokenizer.from_pretrained(hf_id, trust_remote_code=True, token=hf_token)
@@ -229,6 +240,9 @@ def infer_sample(meta, masked_code, model, tok):
         return _diffusion_sample(masked_code, model, tok, meta["mask_token"])
     if eng == "dreamon":
         return _engine("dreamon").predict_one(model, tok, masked_code)[0]
+    if eng == "dgemma":
+        return _engine("dgemma").run_dgemma_on_sample(
+            masked_code, model, tok, meta["max_ctx"])[0]
     raise ValueError(eng)
 
 
