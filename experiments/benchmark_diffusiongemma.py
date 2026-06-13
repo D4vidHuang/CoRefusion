@@ -41,7 +41,11 @@ import time
 MODEL_ID = "google/diffusiongemma-26B-A4B-it"
 DATA_PATH = "data/test.csv"
 RESULTS_DIR = "results/diffusiongemma_smoke"
-MAX_NEW_TOKENS = 64        # one identifier + (empty) thought-channel tags
+# Canvas Length is 256 (model card): block-diffusion denoises a FULL 256-token
+# canvas per block, and the answer follows a mandatory <|channel>thought ...
+# <channel|> prefix. max_new_tokens < canvas starves the canvas and the answer
+# never lands -> empty output. Use >= one full canvas.
+MAX_NEW_TOKENS = 256
 MAX_INPUT_TOKENS = 16384   # model does 256K; cap for speed, FIM-style window
 
 FILL_MARK = "<FILL_HERE>"
@@ -183,9 +187,13 @@ def run_dgemma_on_sample(masked_code, model, processor, max_input_tokens=MAX_INP
             out = model.generate(**inputs, max_new_tokens=MAX_NEW_TOKENS)
         new_ids = out[0][inputs["input_ids"].shape[-1]:]
         raw = processor.decode(new_ids, skip_special_tokens=False)
+        # plain decode drops ALL special tokens -- canvas mask/pad AND the
+        # <|channel>thought ...<channel|> control tokens -- leaving the plain
+        # answer text. Prefer it; fall back to the channel-stripping path on raw.
+        plain = processor.decode(new_ids, skip_special_tokens=True)
         raw_predictions.append(raw)
 
-        pred = clean_prediction(raw)
+        pred = clean_prediction(plain) or clean_prediction(raw)
         predictions.append(pred)
         current_code = prefix + pred + suffix
 
