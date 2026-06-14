@@ -54,18 +54,11 @@ for i in range(M.shape[0]):
 # section dividers between metric groups
 for x in (2.5, 6.5):                                  # after EM-group, after M-group
     ax.axvline(x, color="white", lw=2)
-ax.text(1.0, -1.15, "exact / consistency", ha="center", fontsize=8.5, color="#555")
-ax.text(4.5, -1.15, "M1–M3 similarity / quality", ha="center", fontsize=8.5, color="#555")
-ax.text(9.5, -1.15, "LLM-as-Judge (5 judges)", ha="center", fontsize=8.5, color="#555")
 
 cb = fig.colorbar(im, ax=ax, fraction=0.025, pad=0.02)
 cb.set_label("per-column rank  (blue = worst · orange = best)", fontsize=9)
 cb.set_ticks([0, 1]); cb.set_ticklabels(["worst", "best"])
 
-ax.set_title("CoReFusion full-metric heatmap  (22 models · RefineID · n=1000)\n"
-             "cells show raw values (%); colour = per-column normalisation; "
-             "orange y-labels = dLLM",
-             fontsize=12, fontweight="bold", pad=34)
 fig.text(0.5, 0.005,
          "EM=strict all-sites · EM_c=EM on consistent subset · cons=consistency rate · "
          "lev/nw=M1 · fuzzy=M2 · qual=M3 · Q7/Q14/Q32=Qwen2.5 · M24=Mistral-Small-24B · G27=Gemma-2-27B",
