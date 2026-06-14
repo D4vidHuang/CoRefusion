@@ -388,8 +388,12 @@ def run_exp2(model, tokenizer, df, mask_id, device, out_dir, steps, num_mask,
                 h = history[min(t, len(history) - 1)]
                 hseq = h if h.dim() == 2 else h.unsqueeze(0)
                 hseq = hseq.to(device)
+                # history states can be 1 token LONGER than the input (max_new_tokens=1
+                # appends a slot), so build a fresh all-ones mask matching hseq length
+                # rather than reusing the original (shorter) attention_mask.
+                am2 = torch.ones_like(hseq)
                 with torch.no_grad():
-                    o = model(hseq, attention_mask=am.bool(), output_hidden_states=True)
+                    o = model(hseq, attention_mask=am2.bool(), output_hidden_states=True)
                 hl = o.hidden_states[exp2_layer][0]
                 for p in first_tok:
                     masked_now = bool(hseq[0, p].item() == mask_id)
