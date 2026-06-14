@@ -307,11 +307,48 @@ def run_exp1(model, tokenizer, df, mask_id, device, out_dir, seed, smell_appendi
 # ===========================================================================
 # EXP2 — denoising-step axis, real generation
 # ===========================================================================
+def extract_all_predictions(full_code, masked_code):
+    """Anchor-based extraction of what filled each [MASK] (verbatim copy of the
+    VALIDATED experiments/benchmark_diffusion_models.extract_all_predictions, the
+    same routine the RQ1 unified runner uses to score EM)."""
+    parts = masked_code.split("[MASK]")
+    if len(parts) <= 1:
+        return []
+    preds = []
+    cur = 0
+    for i in range(len(parts) - 1):
+        pre = parts[i].strip()
+        post = parts[i + 1].strip()
+        pre_a = pre[-30:] if len(pre) > 30 else pre
+        post_a = post[:30] if len(post) > 30 else post
+        if pre_a:
+            s = full_code.find(pre_a, cur)
+            s = s + len(pre_a) if s != -1 else cur
+        else:
+            s = cur
+        e = full_code.find(post_a, s) if post_a else -1
+        if e != -1:
+            gap = full_code[s:e].strip()
+            cur = e
+        else:
+            gap = full_code[s:s + 60].strip()
+            cur = s + 60
+        m = re.search(r"[a-zA-Z_$][a-zA-Z0-9_$]*", gap)
+        preds.append(m.group(0) if m else gap[:20])
+    return preds
+
+
 def run_exp2(model, tokenizer, df, mask_id, device, out_dir, steps, num_mask,
              exp2_layer, conf_thresh=0.8):
+    """Real generation via the VALIDATED model.diffusion_generate (entropy alg +
+    top_p, the exact RQ1 path that yields ~0.30 EM), with output_history so we can
+    read the per-step token sequence. Per step we (a) read commitment from the
+    history (first step a target position is no longer masked) and (b) re-run a
+    forward on that history state to capture the hidden state at the target. The
+    old hand-rolled gumbel loop filled garbage (punctuation, EM~0) and is removed."""
     rows = []
-    traj = []  # [steps, d] per target position (first sub-token of each site)
-
+    traj = []
+    n_done = 0
     for idx, row in tqdm(df.iterrows(), total=len(df), desc="EXP2"):
         try:
             snippet_id = row["id"]
@@ -320,79 +357,58 @@ def run_exp2(model, tokenizer, df, mask_id, device, out_dir, steps, num_mask,
             if "[MASK]" not in masked_code:
                 continue
             n_sites = masked_code.count("[MASK]")
-            mask_str = ("<|mask|>" * num_mask)
-            gen_code = masked_code.replace("[MASK]", mask_str)
+            gen_code = masked_code.replace("[MASK]", "<|mask|>" * num_mask)
             enc = tokenizer(gen_code, return_tensors="pt").to(device)
-            x = enc.input_ids.clone()
+            ids = enc.input_ids
             am = enc.attention_mask
-            mask_positions = (x[0] == mask_id).nonzero(as_tuple=True)[0].tolist()
+            mask_positions = (ids[0] == mask_id).nonzero(as_tuple=True)[0].tolist()
             if not mask_positions:
                 continue
-            # group consecutive mask positions into sites (num_mask each)
             sites = [mask_positions[i:i + num_mask]
                      for i in range(0, len(mask_positions), num_mask)]
-            first_tok = [s[0] for s in sites]  # representative position per site
+            first_tok = [s[0] for s in sites]
 
-            num_transfer = get_num_transfer_tokens((x == mask_id).long()[:, :], steps)
-
-            T = steps
-            d = model.config.hidden_size if hasattr(model.config, "hidden_size") else None
-            site_traj = {p: np.zeros((T, 0), dtype=np.float16) for p in first_tok}
-            still_masked = {p: np.ones(T, dtype=bool) for p in first_tok}
-            first_conf = {p: -1 for p in first_tok}
-            flip_step = {p: -1 for p in first_tok}
-            buf = {p: [] for p in first_tok}
-
-            for t in range(T):
-                with torch.no_grad():
-                    cur_mask = (x == mask_id)
-                    out = model(x, attention_mask=am.bool(), output_hidden_states=True)
-                    logits = out.logits
-                    h = out.hidden_states[exp2_layer][0]  # [seq, d]
-                    for p in first_tok:
-                        still_masked[p][t] = bool(cur_mask[0, p].item())
-                        buf[p].append(h[p, :].float().cpu().numpy().astype(np.float16))
-                    if not cur_mask.any():
-                        # fill remaining steps with last hidden state, mark unmasked
-                        for tt in range(t + 1, T):
-                            for p in first_tok:
-                                still_masked[p][tt] = False
-                                buf[p].append(buf[p][-1])
-                        break
-                    noisy = add_gumbel_noise(logits, temperature=0.3)
-                    x0 = torch.argmax(noisy, dim=-1)
-                    p_all = F.softmax(logits.float(), dim=-1)
-                    x0_p = torch.gather(p_all, -1, x0.unsqueeze(-1)).squeeze(-1)
-                    for p in first_tok:
-                        if cur_mask[0, p].item() and x0_p[0, p].item() > conf_thresh and first_conf[p] == -1:
-                            first_conf[p] = t
-                    conf = torch.where(cur_mask, x0_p, torch.tensor(-np.inf, device=device))
-                    k = int(num_transfer[0, t].item()) if num_transfer.shape[1] > t else 0
-                    k = min(k, int(cur_mask.sum().item()))
-                    if k > 0:
-                        _, sel = torch.topk(conf[0], k=k)
-                        tindex = torch.zeros_like(x0, dtype=torch.bool)
-                        tindex[0, sel] = True
-                        x[tindex] = x0[tindex]
-                        for j in sel.tolist():
-                            if j in flip_step and flip_step[j] == -1:
-                                flip_step[j] = t
-
-            # decode final fill at the FIRST site, EM vs developer target
-            first_site = sites[0]
-            pred_ids = x[0, first_site[0]:first_site[0] + num_mask].tolist()
-            pred = tokenizer.decode(pred_ids, skip_special_tokens=True).strip()
+            with torch.no_grad():
+                out = model.diffusion_generate(
+                    ids, attention_mask=am, max_new_tokens=1, steps=steps,
+                    temperature=0.3, top_p=0.95, alg="entropy", alg_temp=0.,
+                    output_history=True, return_dict_in_generate=True)
+            seq = out.sequences[0] if hasattr(out, "sequences") else out[0]
+            full = tokenizer.decode(seq, skip_special_tokens=True)
+            preds = extract_all_predictions(full, masked_code)
+            pred = preds[0] if preds else ""
             em = int(pred == target)
 
+            history = list(out.history) if getattr(out, "history", None) else [seq.unsqueeze(0)]
+            T = steps  # normalize every sample to a fixed step grid for stacking
+            commit = {p: -1 for p in first_tok}
+            still = {p: [True] * T for p in first_tok}
+            hsb = {p: [] for p in first_tok}
+            for t in range(T):
+                h = history[min(t, len(history) - 1)]
+                hseq = h if h.dim() == 2 else h.unsqueeze(0)
+                hseq = hseq.to(device)
+                with torch.no_grad():
+                    o = model(hseq, attention_mask=am.bool(), output_hidden_states=True)
+                hl = o.hidden_states[exp2_layer][0]
+                for p in first_tok:
+                    masked_now = bool(hseq[0, p].item() == mask_id)
+                    still[p][t] = masked_now
+                    if (not masked_now) and commit[p] == -1:
+                        commit[p] = t
+                    hsb[p].append(hl[p, :].float().cpu().numpy().astype(np.float16))
+
             for p in first_tok:
-                arr = np.stack(buf[p])  # [T, d]
-                traj.append(arr)
+                traj.append(np.stack(hsb[p]))
                 rows.append(dict(snippet_id=snippet_id, position=p,
                                  package=package_prefix(masked_code),
-                                 em_correct=em, first_conf=first_conf[p],
-                                 flip_step=flip_step[p], n_sites=n_sites,
+                                 em_correct=em, first_conf=commit[p],
+                                 flip_step=commit[p], n_sites=n_sites,
                                  pred=pred, target=target,
-                                 still_masked=json.dumps(still_masked[p].tolist())))
+                                 still_masked=json.dumps(still[p])))
+            n_done += 1
+            if n_done <= 5:
+                print("  [smoke] id=%s target=%r pred=%r em=%d" % (snippet_id, target, pred, em))
         except Exception as e:  # noqa: BLE001
             if "out of memory" in str(e).lower():
                 torch.cuda.empty_cache()
@@ -400,11 +416,15 @@ def run_exp2(model, tokenizer, df, mask_id, device, out_dir, steps, num_mask,
             raise
 
     meta = pd.DataFrame(rows)
-    X = np.stack(traj)  # [Npos, T, d]
+    X = np.stack(traj)
     np.savez_compressed(os.path.join(out_dir, "exp2_states.npz"), X=X)
     meta.to_csv(os.path.join(out_dir, "exp2_meta.csv"), index=False)
+    em_rate = meta["em_correct"].mean()
     print("[EXP2] positions=%d  steps=%d  d=%d  EM=%.3f  -> exp2_states.npz / exp2_meta.csv"
-          % (X.shape[0], X.shape[1], X.shape[2], meta["em_correct"].mean()))
+          % (X.shape[0], X.shape[1], X.shape[2], em_rate))
+    if em_rate < 0.15:
+        print("[EXP2][WARN] EM=%.3f is far below the expected ~0.30 — generation may be "
+              "misconfigured; do NOT trust the DCL probe until EM looks right." % em_rate)
 
 
 # ===========================================================================

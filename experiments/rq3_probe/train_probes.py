@@ -159,12 +159,15 @@ def exp1(out_dir, n_splits, B, seed):
     early = np.nanmean(contextual[:third])
     late = np.nanmean(contextual[-third:])
 
-    # save probe weight + per-sample w.h scores at chosen layer (for the histogram)
+    # per-sample probe scores at chosen layer (for the histogram) — OUT-OF-FOLD,
+    # package-grouped, so the picture matches the cross-validated AUC (not in-sample).
     m = head["ctx"].values == "intact"
     Xc = X_first[head_idx[m], chosen, :]
     yc = y_all[m]
-    clf = make_probe().fit(Xc, yc)
-    scores = Xc.dot(clf.coef_.ravel()) + clf.intercept_[0]
+    ng = len(np.unique(pkg[m]))
+    cv = GroupKFold(n_splits=max(2, min(n_splits, ng)))
+    scores = cross_val_predict(make_probe(), Xc, yc, cv=cv, groups=pkg[m],
+                               method="decision_function")
 
     # appendix: throw-away smell-vocab curve (intact, bad_source == smell vs good)
     smell_curve = []
@@ -321,6 +324,65 @@ def exp2(out_dir, n_splits, B, seed):
     return res
 
 
+def _flag(ok):
+    return "PASS" if ok else "CHECK"
+
+
+def print_report(e1, e2):
+    """Plain-language reading + sanity gates: WHAT each number means and WHETHER
+    the result is trustworthy (the controls must hold, or the headline is an
+    artifact)."""
+    print("\n" + "=" * 72)
+    print("RQ3 INTERPRETATION REPORT")
+    print("=" * 72)
+    if e1:
+        ch = e1["chosen_layer"]; L = e1["n_layers"]
+        intact = e1["intact_at_chosen"]; scr = e1["scrambled_at_chosen"]
+        ctx = e1["contextual_at_chosen"]; lenb = e1["length_baseline_auc"]
+        sel = e1["selectivity_at_chosen"]; gap = e1["leakage_gap_sample_minus_pkg"]
+        early = e1["early_third_contextual"]; late = e1["late_third_contextual"]
+        print("\n[Exp1 — is name-fit represented, contextually, and where?]")
+        print("  HEADLINE  contextual AUC = %.3f  (intact %.3f - scrambled %.3f) at layer %d/%d"
+              % (ctx, intact, scr, ch, L - 1))
+        print("    -> how strongly the SURROUNDING CODE makes good vs misplaced name")
+        print("       linearly readable. >0 means the model judges fit, not just the token.")
+        print("  depth onset   early-third %.3f  vs  late-third %.3f   [%s late>early]"
+              % (early, late, _flag(late > early + 0.02)))
+        print("    -> name-fit should emerge in the DEEP third (the paper's claim).")
+        print("  --- sanity controls (these decide if the headline is real) ---")
+        print("  length baseline AUC = %.3f   [%s ~0.5]  (sub-word-count cannot separate)"
+              % (lenb, _flag(lenb < 0.60)))
+        print("  selectivity (intact-control) = %.3f   [%s >0.10]  (not memorising labels)"
+              % (sel, _flag(sel > 0.10)))
+        print("  contextual drop on scramble = %.3f   [%s >0.05]  (signal is CONTEXTUAL)"
+              % (intact - scr, _flag(intact - scr > 0.05)))
+        print("  leakage gap (by-sample - by-package) = %.3f   [%s small]  (codebase leak)"
+              % (gap, _flag(abs(gap) < 0.06)))
+        print("  layer-0 embedding AUC = %.3f  (what is trivially readable from raw input)"
+              % e1["layer0_baseline_auc"])
+    if e2:
+        print("\n[Exp2 — does the success signal arrive before commitment?]")
+        print("  EM base rate = %.3f  (PR-AUC no-skill line)" % e2["base_rate"])
+        print("  DCL_area = %.3f   sign-stable in %.0f%% of bootstraps"
+              % (e2["dcl_area"], 100 * e2["dcl_sign_stability"]))
+        print("    -> area between the commitment CDF and the detection curve.")
+        print("       >0 (sign-stable) = commitment runs AHEAD of detection = knows too late.")
+        cf = e2["committed_fraction_at_detection"]
+        print("  committed-fraction-at-detection = %.2f   (%.0f%% of positions already locked"
+              % (cf, 100 * cf))
+        print("       by the time success becomes decodable)")
+        if e2["t_detect_roc075"] is None:
+            print("  detection NEVER clears ROC>=0.75 while still masked -> DCL is a LOWER BOUND")
+            print("       (clean result: the success signal is not decodable pre-commitment at all)")
+        else:
+            print("  detection (ROC>=0.75) at step %.1f / %d" % (e2["t_detect_roc075"], e2["T"]))
+    print("\n" + "=" * 72)
+    print("READING: a credible result has the four Exp1 controls at PASS, contextual")
+    print("AUC rising in the deep third, and a sign-stable DCL>0. If length-baseline")
+    print("is high or scramble-drop is ~0, the probe is reading the token, not fit.")
+    print("=" * 72)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -332,10 +394,12 @@ def main():
     ap.add_argument("--skip-exp2", action="store_true")
     args = ap.parse_args()
 
+    e1 = e2 = None
     if not args.skip_exp1 and os.path.exists(os.path.join(args.out_dir, "exp1_states.npz")):
-        exp1(args.out_dir, args.n_splits, args.bootstrap, args.seed)
+        e1 = exp1(args.out_dir, args.n_splits, args.bootstrap, args.seed)
     if not args.skip_exp2 and os.path.exists(os.path.join(args.out_dir, "exp2_states.npz")):
-        exp2(args.out_dir, args.n_splits, args.bootstrap, args.seed)
+        e2 = exp2(args.out_dir, args.n_splits, args.bootstrap, args.seed)
+    print_report(e1, e2)
 
 
 if __name__ == "__main__":
