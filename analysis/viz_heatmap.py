@@ -16,11 +16,14 @@ COLS = [("em_gated","EM"), ("em_consistent","EM_c"), ("consistency","cons"),
 
 rows = []
 for r in csv.DictReader(open(CSV)):
-    if r["model"] == "DiffusionGemma-26B-A4B":
-        continue
     f = lambda k: float(r[k]) * 100 if r.get(k) not in (None, "", "None") else 0.0
-    rows.append({"model": r["model"], "is_dllm": "dLLM" in r["arch"],
-                 **{k: f(k) for k, _ in COLS}})
+    vals = {k: f(k) for k, _ in COLS}
+    # Skip all-zero rows (e.g. a model whose predictions are all empty): a row
+    # of zeros has no signal and would distort the per-column min-max scaling.
+    # DiffusionGemma auto-appears once its predictions are non-empty.
+    if max(vals.values()) == 0:
+        continue
+    rows.append({"model": r["model"], "is_dllm": "dLLM" in r["arch"], **vals})
 rows.sort(key=lambda r: -r["em_gated"])               # best on top
 
 models = [r["model"] for r in rows]

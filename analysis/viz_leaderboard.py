@@ -11,11 +11,16 @@ LJ = ["LJ_Q7","LJ_Q14","LJ_Q32","LJ_M24","LJ_G27"]
 
 rows = []
 for r in csv.DictReader(open(CSV)):
-    if r["model"] == "DiffusionGemma-26B-A4B":     # output still empty -> exclude
-        continue
     f = lambda k: float(r[k]) * 100 if r.get(k) not in (None, "", "None") else 0.0
     lj = [f(j) for j in LJ]
-    rows.append({"model": r["model"], "arch": r["arch"], "em": f("em_gated"),
+    em = f("em_gated")
+    # Skip rows with no signal at all (e.g. a model whose predictions are all
+    # empty -> EM=0 and every judge 0). Real models clear this bar; this makes
+    # DiffusionGemma auto-appear once its predictions are non-empty, instead of
+    # a hardcoded name exclusion.
+    if em == 0 and max(lj) == 0:
+        continue
+    rows.append({"model": r["model"], "arch": r["arch"], "em": em,
                  "lj_mean": sum(lj)/len(lj), "lj_lo": min(lj), "lj_hi": max(lj),
                  "is_dllm": "dLLM" in r["arch"]})
 rows.sort(key=lambda r: r["em"])           # ascending -> highest on top in barh
@@ -50,9 +55,9 @@ axR.grid(axis="x", alpha=0.25); axR.set_axisbelow(True)
 leg = [Line2D([0],[0], marker="s", color="w", markerfacecolor=ORANGE, markersize=12, label="dLLM (diffusion)"),
        Line2D([0],[0], marker="s", color="w", markerfacecolor=BLUE, markersize=12, label="AR (FIM) / Encoder-decoder")]
 axR.legend(handles=leg, loc="lower right", fontsize=9.5, framealpha=0.95)
-fig.suptitle("CoReFusion identifier-renaming leaderboard   (22 models · RefineID · n=1000)",
+fig.suptitle(f"CoReFusion identifier-renaming leaderboard   ({len(rows)} models · RefineID · n=1000)",
              fontweight="bold", fontsize=13)
-fig.text(0.5, 0.01, "Sorted by strict EM. DiffusionGemma-26B-A4B excluded (output still empty — under debug).",
+fig.text(0.5, 0.01, "Sorted by strict EM. Models with no signal (EM=0 and all judges 0) are omitted.",
          ha="center", fontsize=8.5, color="#777")
 fig.subplots_adjust(left=0.16, right=0.985, top=0.92, bottom=0.10)
 fig.savefig(f"{OUT}/fig6_leaderboard_bars.png", bbox_inches="tight", dpi=150)
