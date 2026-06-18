@@ -46,7 +46,12 @@ fidelity but essentially never fires on real identifiers.
 
 Multi-judge: --judge-model is repeatable (same semantics as
 run_llm_judge_unified.py); judges run sequentially in one process
-(load -> judge all 1,000 -> unload -> next judge).
+(load -> judge all 1,000 -> unload -> next judge). To reproduce the SAME 5-judge
+panel as the main benchmark (Qwen2.5-7B / Qwen2.5-14B / Mistral-Small-24B /
+Gemma-2-27B-It / Qwen2.5-32B), run one GPU job per judge with
+server/jobs/gt_judge_multi.sh, then merge with --combine-only on the login node.
+The big three (24B/27B/32B, bf16 47-65GB) need a 96GB card; Gemma-2-27B-It is
+gated -> set HF_TOKEN.
 
 Outputs (under results/ so one zip captures everything):
   results/refineid_groundtruth_judge/groundtruth__judge_<judge>__<ts>.csv   per-sample
@@ -275,6 +280,34 @@ SUMM_COLS = ["judge_model", "mask_fill", "n", "accept", "reject", "parse_fail",
              "residual_mask_n", "residual_mask_rate", "out_file"]
 
 
+_PER_SAMPLE_RE = re.compile(r"^groundtruth__judge_(?P<judge>.+)__(?P<ts>\d{8}_\d{6})\.csv$")
+
+
+def collect_existing_summaries():
+    """--combine-only: latest per-sample CSV per judge, re-summarized.
+
+    Lets the one-card-per-judge launcher (server/jobs/gt_judge_multi.sh) run each
+    judge in its own GPU job, then merge them into one cross-judge table on the
+    login node (no GPU). Mirrors run_llm_judge_unified.collect_existing_summaries.
+    """
+    latest = {}
+    for p in glob.glob(os.path.join(OUT_DIR, "groundtruth__judge_*__*.csv")):
+        m = _PER_SAMPLE_RE.match(os.path.basename(p))
+        if not m:
+            continue
+        j, ts = m.group("judge"), m.group("ts")
+        if j not in latest or ts > latest[j][0]:
+            latest[j] = (ts, p)
+    out = []
+    for j, (_ts, p) in sorted(latest.items()):
+        s = summarize(p)
+        s["judge_model"] = j
+        s["mask_fill"] = ""              # not recoverable from the per-sample CSV
+        s["out_file"] = os.path.relpath(p, REPO)
+        out.append(s)
+    return out
+
+
 def _pct(x):
     return "   n/a" if x is None else f"{x*100:5.2f}%"
 
@@ -337,6 +370,9 @@ def main():
                          "first [MASK] becomes the gt, others stay [MASK]. 'all': also "
                          "fill the remaining sites with the gt for a clean-context upper "
                          "bound (removes residual-[MASK] noise).")
+    ap.add_argument("--combine-only", action="store_true",
+                    help="no judging: rebuild the cross-judge summary from existing "
+                         "per-sample CSVs (run after one-card-per-judge jobs finish)")
     ap.add_argument("--data", default=DATA_PATH, help="path to RefineID test.csv")
     ap.add_argument("--list-models", action="store_true")
     args = ap.parse_args()
@@ -344,6 +380,14 @@ def main():
     if args.list_models:
         for nm, mid in judge.JUDGE_REGISTRY.items():
             print(f"  {nm:<24} -> {mid}")
+        return
+
+    if args.combine_only:
+        rows = collect_existing_summaries()
+        if not rows:
+            sys.exit(f"No per-sample judge CSVs found in {OUT_DIR}.")
+        print(f"  found {len(rows)} judge result set(s)")
+        write_summary(rows)
         return
 
     # resolve judge ids/names exactly like llm_judge_variable_naming.main()

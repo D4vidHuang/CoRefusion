@@ -34,6 +34,11 @@
 #   sbatch --gres=gpu:<GRES型名>:1 server/run_llm_judge_groundtruth.slurm \
 #          --judge-model Qwen2.5-32B-Instruct
 #   （GRES 型名用  sinfo -o "%N %G" | grep -i 6000  查询）
+#
+# 复现正式 benchmark 的同一套 5-judge 面板（Qwen2.5-7B/14B/32B + Mistral-Small-24B
+# + Gemma-2-27B-It），每个 judge 一卡并行 + 事后合并：
+#   GPU_TYPE=<GRES型名> HF_TOKEN=hf_xxx bash server/jobs/gt_judge_multi.sh
+#   # 全部结束后：python experiments/judge_refineid_ground_truth.py --combine-only
 set -euo pipefail
 source /tudelft.net/staff-umbrella/CoReFusion/CoRefusion/server/env_daic.sh
 mkdir -p logs

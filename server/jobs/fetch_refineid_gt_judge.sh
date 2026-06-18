@@ -21,6 +21,7 @@ FILES=(
   experiments/judge_refineid_ground_truth.py
   experiments/llm_judge_variable_naming.py
   server/run_llm_judge_groundtruth.slurm
+  server/jobs/gt_judge_multi.sh
 )
 TS=$(date +%s)   # cache-buster：绕开 raw 的 ~5 分钟 CDN 缓存
 for f in "${FILES[@]}"; do
@@ -44,8 +45,15 @@ if [ ! -f data/test.csv ]; then
   echo "WARN: 缺 data/test.csv（1000 条 RefineID 基准），请确认它在仓库里。" >&2
 fi
 
+chmod +x server/jobs/gt_judge_multi.sh 2>/dev/null || true
+
 echo
 echo "下一步："
 echo "  cd $PROJ && mkdir -p logs"
+echo "  # 单 judge（默认 Qwen2.5-7B）："
 echo "  sbatch server/run_llm_judge_groundtruth.slurm --max-samples 50   # 冒烟"
 echo "  sbatch server/run_llm_judge_groundtruth.slurm                    # 全量"
+echo "  # 复现全部 5-judge 面板（一卡一 judge 并行）："
+echo "  GPU_TYPE=<GRES型名> HF_TOKEN=hf_xxx bash server/jobs/gt_judge_multi.sh"
+echo "  # 全部结束后合并跨 judge 表："
+echo "  python experiments/judge_refineid_ground_truth.py --combine-only"
