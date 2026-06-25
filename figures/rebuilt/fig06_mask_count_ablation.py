@@ -27,8 +27,11 @@ from corefusion_style import (BLUE, ORANGE, INK, GRAY, GRID,
     apply_style, savefig)
 apply_style()
 
+import glob
 REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-DREAMON_SUMMARY = os.path.join(REPO, "results", "1t5t_exp", "dreamon_mask_ablation_summary.csv")
+ABL_DIR = os.path.join(REPO, "results", "1t5t_exp")
+DREAMON_SUMMARY = os.path.join(ABL_DIR, "dreamon_mask_ablation_summary.csv")
+DREAMON_PERK_GLOB = os.path.join(ABL_DIR, "dreamon_mask_ablation_k*tok_*.csv")
 
 CYAN = "#00A6D6"   # TU Delft cyan — third dLLM (DreamOn)
 
@@ -40,15 +43,21 @@ EM_DREAM = [24.5, 34.8, 26.0, 18.8, 15.6]   # DreamCoder-7B (orange) — publish
 
 
 def load_dreamon_em():
-    """DreamOn first-site EM per k from the ablation summary, or None if absent."""
-    if not os.path.exists(DREAMON_SUMMARY):
-        return None
+    """DreamOn first-site EM per k. Prefer the per-k files (one per single-k job,
+    race-free), fall back to the shared summary. None if nothing found."""
     by_k = {}
-    with open(DREAMON_SUMMARY, newline="", encoding="utf-8") as f:
-        for r in csv.DictReader(f):
+    for fp in sorted(glob.glob(DREAMON_PERK_GLOB)):   # latest file per k wins
+        try:
+            for r in csv.DictReader(open(fp, newline="", encoding="utf-8")):
+                if r.get("model") == "DreamOn-7B":
+                    by_k[int(r["k"])] = float(r["em"])
+        except (KeyError, ValueError, OSError):
+            pass
+    if os.path.exists(DREAMON_SUMMARY):
+        for r in csv.DictReader(open(DREAMON_SUMMARY, newline="", encoding="utf-8")):
             if r.get("model") == "DreamOn-7B":
                 try:
-                    by_k[int(r["k"])] = float(r["em"])
+                    by_k.setdefault(int(r["k"]), float(r["em"]))   # don't override per-k
                 except (KeyError, ValueError):
                     pass
     if not by_k:

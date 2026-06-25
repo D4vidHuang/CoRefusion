@@ -39,6 +39,8 @@ import argparse
 from collections import Counter
 from datetime import datetime
 
+import random
+
 import torch
 from transformers import AutoTokenizer, AutoModel
 from tqdm import tqdm
@@ -107,7 +109,11 @@ def main():
     ap = argparse.ArgumentParser(description="DreamOn mask-token count ablation (k sweep).")
     ap.add_argument("--data", default=DATA_PATH)
     ap.add_argument("--mask-counts", nargs="+", type=int, default=[1, 2, 3, 4, 5])
-    ap.add_argument("--max-samples", type=int, default=None)
+    ap.add_argument("--max-samples", type=int, default=None, help="legacy: take the FIRST N rows")
+    ap.add_argument("--sample", type=int, default=100,
+                    help="randomly subsample N rows with a FIXED seed -> the SAME set in every "
+                         "k job (so the 5 single-k runs are directly comparable). 0 = use all.")
+    ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--context-chars", type=int, default=bdo.CONTEXT_CHARS)
     ap.add_argument("--max-new-tokens", type=int, default=bdo.MAX_NEW_TOKENS)
     ap.add_argument("--max-sites", type=int, default=bdo.MAX_SITES_IN_WINDOW)
@@ -121,8 +127,16 @@ def main():
     print(f"  model={MODEL_ID}  k={args.mask_counts}  device={DEVICE}")
     print("=" * 65)
 
-    data = load_data(args.data, args.max_samples)
-    print(f"  {len(data)} samples")
+    all_rows = load_data(args.data, args.max_samples)
+    if args.sample and 0 < args.sample < len(all_rows):
+        # fixed seed -> identical subset (and order) in every single-k job
+        data = random.Random(args.seed).sample(all_rows, args.sample)
+        print(f"  randomly sampled {len(data)}/{len(all_rows)} rows (seed={args.seed}); "
+              f"this exact set is used by every k job. first ids: "
+              f"{[r['id'] for r in data[:8]]}", flush=True)
+    else:
+        data = all_rows
+        print(f"  {len(data)} samples (no subsample)", flush=True)
 
     t0 = time.time()
     tok = AutoTokenizer.from_pretrained(MODEL_ID, trust_remote_code=True)
@@ -199,9 +213,16 @@ def main():
             summary.append({"model": MODEL_NAME, "k": k,
                             "em": round(em_first, 2), "em_allsites": round(em_all, 2),
                             "em_majority": round(em_maj, 2), "n": n})
-            # Persist after each k so a walltime timeout keeps completed k's.
-            merge_write_summary(summary)
-            print(f"    -> summary updated ({len(summary)} k done): {SUMMARY_CSV}")
+            # ONE result file per k -> race-free when the five k run as parallel
+            # single-k jobs (a shared summary would clobber). fig06 reads these.
+            per_k_path = os.path.join(RESULTS_DIR, f"dreamon_mask_ablation_k{k}tok_{ts}.csv")
+            with open(per_k_path, "w", newline="", encoding="utf-8") as f:
+                w = csv.DictWriter(f, fieldnames=["model", "k", "em", "em_allsites", "em_majority", "n"])
+                w.writeheader()
+                w.writerow({"model": MODEL_NAME, "k": k, "em": round(em_first, 2),
+                            "em_allsites": round(em_all, 2), "em_majority": round(em_maj, 2), "n": n})
+            merge_write_summary(summary)   # shared summary too (fine for a single all-k job)
+            print(f"    -> wrote {per_k_path}", flush=True)
     finally:
         del model, tok
         if torch.cuda.is_available():
