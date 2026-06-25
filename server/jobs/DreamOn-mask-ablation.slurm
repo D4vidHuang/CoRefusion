@@ -5,7 +5,7 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=48G
-#SBATCH --time=48:00:00
+#SBATCH --time=24:00:00
 #SBATCH --output=logs/dreamon-mask-abl-%j.out
 #SBATCH --error=logs/dreamon-mask-abl-%j.err
 # DreamOn-7B mask-token count ablation (k=1..5) -> Fig 5 (fig06_mask_count_ablation).

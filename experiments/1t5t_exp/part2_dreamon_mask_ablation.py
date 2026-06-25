@@ -85,6 +85,23 @@ def score_site_preds(site_preds, gt):
     return first_c, allsites_c, maj_c
 
 
+def merge_write_summary(summary_rows):
+    """(Re)write the stable summary CSV = other-model prior rows + this model's
+    rows so far. Called after EVERY k so a 24h timeout never loses completed k's."""
+    prior = []
+    if os.path.exists(SUMMARY_CSV):
+        with open(SUMMARY_CSV, newline="", encoding="utf-8") as f:
+            prior = [r for r in csv.DictReader(f) if r.get("model") != MODEL_NAME]
+    fields = ["model", "k", "em", "em_allsites", "em_majority", "n"]
+    with open(SUMMARY_CSV, "w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=fields)
+        w.writeheader()
+        for r in prior:
+            w.writerow({c: r.get(c, "") for c in fields})
+        for r in summary_rows:
+            w.writerow({c: r.get(c, "") for c in fields})
+
+
 def main():
     ap = argparse.ArgumentParser(description="DreamOn mask-token count ablation (k sweep).")
     ap.add_argument("--data", default=DATA_PATH)
@@ -173,24 +190,16 @@ def main():
             summary.append({"model": MODEL_NAME, "k": k,
                             "em": round(em_first, 2), "em_allsites": round(em_all, 2),
                             "em_majority": round(em_maj, 2), "n": n})
+            # Persist after each k so a walltime timeout keeps completed k's.
+            merge_write_summary(summary)
+            print(f"    -> summary updated ({len(summary)} k done): {SUMMARY_CSV}")
     finally:
         del model, tok
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
         gc.collect()
 
-    # Stable summary the figure reads. Merge with any prior rows for OTHER models.
-    prior = []
-    if os.path.exists(SUMMARY_CSV):
-        with open(SUMMARY_CSV, newline="", encoding="utf-8") as f:
-            prior = [r for r in csv.DictReader(f) if r.get("model") != MODEL_NAME]
-    with open(SUMMARY_CSV, "w", newline="", encoding="utf-8") as f:
-        w = csv.DictWriter(f, fieldnames=["model", "k", "em", "em_allsites", "em_majority", "n"])
-        w.writeheader()
-        for r in prior:
-            w.writerow({c: r.get(c, "") for c in w.fieldnames})
-        for r in summary:
-            w.writerow(r)
+    merge_write_summary(summary)   # final consistent write
 
     print("\n" + "=" * 65)
     print("  SUMMARY (headline = first-site EM, comparable to Fig 6a)")

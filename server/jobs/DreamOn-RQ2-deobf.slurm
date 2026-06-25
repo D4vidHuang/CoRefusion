@@ -5,7 +5,7 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=48G
-#SBATCH --time=36:00:00
+#SBATCH --time=24:00:00
 #SBATCH --output=logs/dreamon-rq2-%j.out
 #SBATCH --error=logs/dreamon-rq2-%j.err
 # DreamOn-7B RQ2 deobfuscation: both all-masked AND target-only, one job.
