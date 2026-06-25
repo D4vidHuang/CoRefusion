@@ -38,10 +38,10 @@ if [ -z "$GRES" ]; then
          | grep -ioE 'gpu:[a-z0-9_]*6000[a-z0-9_]*' | head -1 | sed 's/^gpu://') || true
 fi
 if [ -n "$GRES" ]; then
-  echo "  gres=gpu:${GRES}:1 ; submitting SMOKE (--debug, 5 samples) to dump generation_config ..."
-  sbatch --gres=gpu:"${GRES}":1 server/jobs/DiffStep-dgemma.slurm --max-samples 5 --debug
-  echo "  -> check logs/diffstep-dgemma-*.out: look for 'max-steps field : ...' (not NOT FOUND)."
-  echo "  -> then FULL:  sbatch --gres=gpu:${GRES}:1 server/jobs/DiffStep-dgemma.slurm"
+  echo "  gres=gpu:${GRES}:1 ; submitting full sweep ..."
+  # The job dumps generation_config and auto-detects the max-steps / early-stop
+  # fields at startup; if it can't find them it exits fast (check the .out).
+  sbatch --gres=gpu:"${GRES}":1 server/jobs/DiffStep-dgemma.slurm
 else
   echo "  [!] could not auto-detect a 96GB GPU GRES. Find it:"
   echo "        sinfo -o \"%N %G\" | grep -iE \"6000|pro\""
