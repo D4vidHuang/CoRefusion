@@ -27,6 +27,17 @@ JUDGE2COL = {"Qwen2.5-7B-Instruct": "LJ_Q7", "Qwen2.5-14B-Instruct": "LJ_Q14",
 # ---------------------------------------------------------------------------
 # benchmarked models (one row each)
 # ---------------------------------------------------------------------------
+def _family(arch):
+    a = (arch or "").lower()
+    if "dllm" in a:
+        return "dLLM"
+    if "encoder" in a or "seq2seq" in a or "t5" in a:
+        return "Seq2Seq"
+    return "AR"
+
+# row order: group by architecture (dLLM -> AR -> Seq2Seq), alphabetical within group
+FAM_ORDER = {"dLLM": 0, "AR": 1, "Seq2Seq": 2}
+
 rows = []
 for r in csv.DictReader(open(CSV)):
     f = lambda k: float(r[k]) * 100 if r.get(k) not in (None, "", "None") else 0.0
@@ -36,8 +47,8 @@ for r in csv.DictReader(open(CSV)):
     # DiffusionGemma auto-appears once its predictions are non-empty.
     if max(vals.values()) == 0:
         continue
-    rows.append({"model": r["model"], "is_dllm": "dLLM" in r["arch"], **vals})
-rows.sort(key=lambda r: -r["em_gated"])               # best on top
+    rows.append({"model": r["model"], "family": _family(r["arch"]), **vals})
+rows.sort(key=lambda r: (FAM_ORDER[r["family"]], r["model"].lower()))
 
 models = [r["model"] for r in rows]
 M = np.array([[r[k] for k, _ in COLS] for r in rows])  # raw values (%)
@@ -91,7 +102,7 @@ with np.errstate(invalid="ignore"):
 M_disp = np.vstack([gt_vec, M])
 N_disp = np.vstack([N_gt, N])
 labels = ["★ Ground Truth"] + models
-is_dllm = [None] + [r["is_dllm"] for r in rows]        # None marks the ceiling row
+fam_list = [None] + [r["family"] for r in rows]        # None marks the ceiling row
 
 # ---------------------------------------------------------------------------
 # plot
@@ -105,12 +116,13 @@ ax.set_xticks(range(len(COLS)))
 ax.set_xticklabels([h for _, h in COLS], fontsize=9.5)
 ax.set_yticks(range(len(labels)))
 ax.set_yticklabels(labels, fontsize=9)
-for tick, dl in zip(ax.get_yticklabels(), is_dllm):    # colour model name by family
-    if dl is None:                                     # the ground-truth ceiling row
+FAM_COLOR = {"dLLM": ORANGE, "AR": "#222", "Seq2Seq": BLUE}
+for tick, fam in zip(ax.get_yticklabels(), fam_list):  # colour model name by family
+    if fam is None:                                    # the ground-truth ceiling row
         tick.set_color(GREEN); tick.set_fontweight("bold")
     else:
-        tick.set_color(ORANGE if dl else "#222")
-        if dl:
+        tick.set_color(FAM_COLOR[fam])
+        if fam == "dLLM":
             tick.set_fontweight("bold")
 ax.tick_params(top=True, labeltop=True, bottom=False, labelbottom=False)
 
@@ -129,6 +141,11 @@ for i in range(M_disp.shape[0]):
 
 # divider separating the ceiling row from the benchmarked models
 ax.axhline(0.5, color="k", lw=2.5)
+# dividers between architecture groups (dLLM | AR | Seq2Seq). model j is display row j+1.
+_mfams = [r["family"] for r in rows]
+for j in range(1, len(_mfams)):
+    if _mfams[j] != _mfams[j - 1]:
+        ax.axhline(j + 0.5, color="k", lw=1.4, alpha=0.55)
 # section dividers between metric groups
 for x in (2.5, 6.5):                                  # after EM-group, after M-group
     ax.axvline(x, color="white", lw=2)

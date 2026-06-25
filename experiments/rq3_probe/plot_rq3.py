@@ -159,14 +159,20 @@ def fig3(fig_dir, regime_csv, cap_n):
                     float(np.median([b for _, b in agg[k]]))) for k in order if k in agg]
 
     fig, ax = plt.subplots(figsize=(3.6, 2.8))
+    # The x=1 (smell) endpoints of the three regimes sit very close on the log
+    # axis (~492/676/733) so their value labels collide -> stagger per regime.
+    # Order is fixed: 0=HighConfident, 1=Uncertain, 2=RareConfident.
+    L_OFF = [(-4, 2), (-4, 2), (-4, 5)]      # good (x=0) labels
+    R_OFF = [(7, -4), (7, 5), (7, 13)]       # smell (x=1): keep label order = value order
     for i, (name, rgt, rsm) in enumerate(regimes):
         ax.plot([0, 1], [rgt, rsm], "-o", lw=1.4, ms=4,
                 color=["#3498db", "#9b59b6", "#e74c3c"][i % 3], label=name)
-        ax.annotate("%d" % rgt, (0, rgt), textcoords="offset points", xytext=(-3, 2),
-                    ha="right", fontsize=6)
-        ax.annotate("%d" % rsm, (1, rsm), textcoords="offset points", xytext=(3, 2),
-                    ha="left", fontsize=6)
+        ax.annotate("%d" % rgt, (0, rgt), textcoords="offset points", xytext=L_OFF[i % 3],
+                    ha="right", fontsize=7)
+        ax.annotate("%d" % rsm, (1, rsm), textcoords="offset points", xytext=R_OFF[i % 3],
+                    ha="left", fontsize=7)
     ax.set_yscale("log")
+    ax.set_xlim(-0.20, 1.18)   # margin so the 10989 / right-side labels don't clip
     ax.set_xticks([0, 1]); ax.set_xticklabels(["good\n(developer)", "smell\n(injected)"])
     ax.set_ylabel("median rank in output distribution (log)")
     ax.set_title("RQ3 — regime-dependent ranking; rare names invert")

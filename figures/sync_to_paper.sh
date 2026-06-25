@@ -40,4 +40,8 @@ copy "$HERE/figures/new/benchmark_metric_ranks.pdf" "benchmark_metric_ranks.pdf"
 copy "$HERE/figures/new/fig8_rq2_em_june.pdf" "fig8_rq2_em_june.pdf"
 # Fig 10 (paper): RQ3 depth-probe (legends/annotation off the data)
 copy "$HERE/figures/new/rq3/fig_rq3_exp1_depth_probe.pdf" "fig_rq3_exp1_depth_probe.pdf"
+# Fig 12 (paper): RQ3 regime inversion (value labels de-overlapped)
+copy "$HERE/figures/new/rq3/fig_rq3_regime_inversion.pdf" "fig_rq3_regime_inversion.pdf"
+# Fig 3 (paper): metric heatmap, GT-ceiling version, grouped by architecture
+copy "$HERE/figures/new/fig7_metric_heatmap.png" "fig7_metric_heatmap.png"
 echo "done."
