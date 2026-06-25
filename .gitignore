@@ -22,3 +22,6 @@ notebooks/misc.ipynb
 # Server runtime artifacts (large / generated; live on the umbrella share)
 hf_models/
 logs/
+
+# local matplotlib venv for building figures
+.venv-fig/

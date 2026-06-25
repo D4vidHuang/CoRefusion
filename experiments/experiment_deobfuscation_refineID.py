@@ -17,7 +17,9 @@ Three modes for evaluating localization–filling asymmetry:
       Each filled identifier is inserted back before the next is attempted.
       Tests whether iterative recovery improves over all-at-once.
 
-Models: DiffuCoder-7B-Base, DreamCoder-7B
+Models: DiffuCoder-7B (diffusion), DreamCoder-7B (diffusion), DreamOn-7B (dreamon,
+        variable canvas). DiffusionGemma-26B-A4B is RQ1-only (block-AR, no in-place
+        [MASK] canvas) and is intentionally NOT in the registry.
 Data:   data/test.csv (same 1000 samples as RQ1 benchmark)
 
 Usage:
@@ -72,16 +74,37 @@ MAX_INPUT_TOKENS = 16384     # DiffuCoder supports 131072; generous limit
 DIFFUSION_STEPS = 64         # Match RQ1 benchmark
 SENTINEL = "[DEOBF_MASK]"   # Sentinel for template-based extraction
 
+# DreamOn (variable-canvas) inference config -- mirror the RQ1 unified runner
+# (benchmark_dreamon.predict_one defaults) so the deobfuscation numbers are
+# comparable to RQ1 DreamOn. DreamOn places these <|mask|> tokens per site and
+# may expand/contract the canvas during denoising.
+DREAMON_NUM_MASK_PER_SITE = 4
+DREAMON_CONTEXT_CHARS = 3000
+DREAMON_MAX_NEW_TOKENS = 64
+DREAMON_MAX_SITES = 8
+
 # ---- Model Registry ---------------------------------------------------------
+# engine: "diffusion" -> fixed-canvas in-place infill (DiffuCoder/DreamCoder),
+#         "dreamon"   -> variable-canvas tiled infill (benchmark_dreamon).
+# NOTE: DiffusionGemma-26B-A4B is intentionally absent: it is block-AR
+# (prompted per-site naming, no in-place [MASK] canvas), so the deobfuscation
+# protocol -- which masks tokens in place -- does not apply. It is RQ1-only.
 
 MODEL_REGISTRY = {
     "DiffuCoder-7B": {
         "id": "apple/DiffuCoder-7B-Base",
+        "engine": "diffusion",
         "mask_token": "<|mask|>",
     },
     "DreamCoder-7B": {
         "id": "Dream-org/Dream-Coder-v0-Instruct-7B",
+        "engine": "diffusion",
         "mask_token": "<|mask|>",
+    },
+    "DreamOn-7B": {
+        "id": "Dream-org/DreamOn-v0-7B",
+        "engine": "dreamon",
+        "mask_token": "<|mask|>",   # placed by benchmark_dreamon.build_multisite_prompt
     },
 }
 
@@ -259,6 +282,55 @@ def prepare_masked_input(
     template = pattern.sub(SENTINEL, obfuscated_code)
 
     return masked_code, template, positions
+
+
+# ---- DreamOn (variable-canvas) inference ------------------------------------
+
+_BENCH_DREAMON = None
+
+
+def _dreamon():
+    """Lazy import of the DreamOn benchmark module (sibling file)."""
+    global _BENCH_DREAMON
+    if _BENCH_DREAMON is None:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import benchmark_dreamon as bdo
+        _BENCH_DREAMON = bdo
+    return _BENCH_DREAMON
+
+
+def dreamon_predict_sites(
+    model, tokenizer, obfuscated_code: str, mask_map: Dict[str, str],
+    num_mask_per_site: int = DREAMON_NUM_MASK_PER_SITE,
+    context_chars: int = DREAMON_CONTEXT_CHARS,
+    max_new_tokens: int = DREAMON_MAX_NEW_TOKENS,
+    max_sites: int = DREAMON_MAX_SITES,
+) -> Tuple[List[str], List[Dict]]:
+    """Mask the requested identifiers with the literal ``[MASK]`` placeholder and
+    let DreamOn's tiled variable-canvas infill recover one name per site.
+
+    Reuses ``prepare_masked_input`` (mask_token="[MASK]", count=1) so the site
+    order in ``positions`` matches the left-to-right ``[MASK]`` order that
+    ``benchmark_dreamon.predict_one`` returns -- predictions[i] <-> positions[i].
+
+    Returns (predictions, positions).
+    """
+    masked_code, _template, positions = prepare_masked_input(
+        obfuscated_code, mask_map, "[MASK]", 1,
+    )
+    if not positions:
+        return [], positions
+    site_preds, _n_windows = _dreamon().predict_one(
+        model, tokenizer, masked_code,
+        num_mask_per_site=num_mask_per_site,
+        context_chars=context_chars,
+        max_new_tokens=max_new_tokens,
+        max_sites=max_sites,
+    )
+    # Align length defensively (predict_one returns one pred per [MASK] site).
+    if len(site_preds) < len(positions):
+        site_preds = site_preds + [""] * (len(positions) - len(site_preds))
+    return site_preds[:len(positions)], positions
 
 
 # ---- Prediction Extraction --------------------------------------------------
@@ -556,6 +628,20 @@ def run_experiment(target_models=None, max_samples=None, hf_repo=None, hf_token=
             continue
 
         mask_token = meta["mask_token"]
+        engine = meta.get("engine", "diffusion")
+
+        # Sequential fill is only implemented for the fixed-canvas diffusion
+        # engine. DreamOn (variable canvas) supports all-masked / target-only.
+        if mode == "sequential" and engine != "diffusion":
+            print(f"  SKIP: --mode sequential is diffusion-only; '{model_name}' "
+                  f"is engine='{engine}'. Use --mode all-masked or target-only.")
+            all_summaries.append({"model": model_name,
+                                  "error": f"sequential unsupported for engine={engine}"})
+            del model, tokenizer
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            gc.collect()
+            continue
 
         # ── Inference loop ──────────────────────────────────────────
         results = []
@@ -580,29 +666,7 @@ def run_experiment(target_models=None, max_samples=None, hf_repo=None, hf_token=
                     skipped += 1
                     continue
 
-                # 3. Build input depending on mode
-                if mode == "target-only":
-                    # Only mask the TARGET variable; keep other obfuscated names
-                    # Find the obfuscated name for the target
-                    target_obf = obfuscation_map.get(target)
-                    if not target_obf:
-                        results.append({"id": item_id, "skipped": "target_not_in_map"})
-                        skipped += 1
-                        continue
-                    # Replace only the target's obfuscated name with masks
-                    target_mask_map = {target: target_obf}
-                    input_code, template, positions = prepare_masked_input(
-                        obfuscated_code, target_mask_map, mask_token, NUM_MASK_TOKENS,
-                    )
-                elif mode == "sequential":
-                    # Will be handled below in a separate loop
-                    pass
-                else:  # all-masked
-                    input_code, template, positions = prepare_masked_input(
-                        obfuscated_code, obfuscation_map, mask_token, NUM_MASK_TOKENS,
-                    )
-
-                # --- Sequential mode: fill one identifier at a time ---
+                # 3a. Sequential mode (diffusion only) — fill one id at a time
                 if mode == "sequential":
                     seq_results = _run_sequential_fill(
                         model, tokenizer, obfuscated_code, obfuscation_map,
@@ -633,40 +697,60 @@ def run_experiment(target_models=None, max_samples=None, hf_repo=None, hf_token=
                     })
                     continue
 
-                # --- Non-sequential modes (all-masked, target-only) ---
-                # 4. Tokenize and check length
-                inputs = tokenizer(input_code, return_tensors="pt")
-                input_ids = inputs.input_ids.to(DEVICE)
-                attention_mask = inputs.attention_mask.to(DEVICE)
+                # 3b. Pick which identifiers to mask for this mode
+                if mode == "target-only":
+                    target_obf = obfuscation_map.get(target)
+                    if not target_obf:
+                        results.append({"id": item_id, "skipped": "target_not_in_map"})
+                        skipped += 1
+                        continue
+                    mask_map = {target: target_obf}
+                else:  # all-masked
+                    mask_map = obfuscation_map
 
-                if input_ids.shape[1] > MAX_INPUT_TOKENS:
-                    results.append({
-                        "id": item_id, "skipped": "too_long",
-                        "token_length": input_ids.shape[1],
-                    })
-                    skipped += 1
-                    continue
-
-                # 5. Diffusion generation (same params as RQ1 benchmark)
-                with torch.no_grad():
-                    output = model.diffusion_generate(
-                        input_ids,
-                        attention_mask=attention_mask,
-                        max_new_tokens=1,
-                        steps=DIFFUSION_STEPS,
-                        temperature=0.3,
-                        top_p=0.95,
-                        alg="entropy",
-                        alg_temp=0.,
+                # 4. Inference dispatch by engine -> predictions aligned to positions
+                if engine == "dreamon":
+                    predictions, positions = dreamon_predict_sites(
+                        model, tokenizer, obfuscated_code, mask_map,
                     )
+                    if not positions:
+                        results.append({"id": item_id, "skipped": "no_mask_positions"})
+                        skipped += 1
+                        continue
+                    token_length = 0
+                else:  # diffusion (DiffuCoder / DreamCoder), in-place infill
+                    input_code, template, positions = prepare_masked_input(
+                        obfuscated_code, mask_map, mask_token, NUM_MASK_TOKENS,
+                    )
+                    inputs = tokenizer(input_code, return_tensors="pt")
+                    input_ids = inputs.input_ids.to(DEVICE)
+                    attention_mask = inputs.attention_mask.to(DEVICE)
 
-                generated_ids = output.sequences[0] if hasattr(output, "sequences") else output[0]
-                full_output = tokenizer.decode(generated_ids, skip_special_tokens=True)
+                    if input_ids.shape[1] > MAX_INPUT_TOKENS:
+                        results.append({
+                            "id": item_id, "skipped": "too_long",
+                            "token_length": input_ids.shape[1],
+                        })
+                        skipped += 1
+                        continue
 
-                # 6. Extract predictions
-                predictions = extract_deobfuscation_predictions(full_output, template)
+                    with torch.no_grad():
+                        output = model.diffusion_generate(
+                            input_ids,
+                            attention_mask=attention_mask,
+                            max_new_tokens=1,
+                            steps=DIFFUSION_STEPS,
+                            temperature=0.3,
+                            top_p=0.95,
+                            alg="entropy",
+                            alg_temp=0.,
+                        )
+                    generated_ids = output.sequences[0] if hasattr(output, "sequences") else output[0]
+                    full_output = tokenizer.decode(generated_ids, skip_special_tokens=True)
+                    predictions = extract_deobfuscation_predictions(full_output, template)
+                    token_length = int(input_ids.shape[1])
 
-                # 7. Evaluate
+                # 5. Evaluate (engine-agnostic)
                 metrics = evaluate_predictions(predictions, positions)
 
                 total_id_correct += metrics['identifiers_correct']
@@ -685,7 +769,7 @@ def run_experiment(target_models=None, max_samples=None, hf_repo=None, hf_token=
                     "site_predictions_json": json.dumps(metrics.get('group_site_predictions', {})),
                     "originals_json": json.dumps(metrics['originals']),
                     "mapping_json": json.dumps(obfuscation_map),
-                    "token_length": input_ids.shape[1],
+                    "token_length": token_length,
                 })
 
             except torch.cuda.OutOfMemoryError:

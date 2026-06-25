@@ -5,8 +5,8 @@ RQ3 v2 — figures (matplotlib only; reads precomputed JSON, no model/sklearn).
   Fig 1 (Exp1, 2 panels): contextual-AUC(layer) curve with bootstrap band and the
         baseline/control reference lines (left) + the 1D probe-projection histogram
         good vs bad at the chosen layer (right) -> REPLACES the UMAP scatter.
-  Fig 2 (Exp2, 1 panel + inset): AUC(step) on still-masked positions + commitment
-        CDF on one shared step axis, area-between shaded = DCL; 3x3 sensitivity inset.
+  Fig 2 (Exp2): detection AUC(step) on still-masked positions + commitment CDF on
+        one shared step axis; peak-ROC and median-commit marked, summary in caption.
   Fig 3 (output-distribution inversion): r_gt vs r_smell across the three regimes,
         showing the RareConfident sign flip. Numbers default to the paper's Table VII
         (override with --regime-csv id,regime,r_gt,r_smell).
@@ -114,45 +114,27 @@ def fig2(out_dir, fig_dir, cap_n):
     roc = np.array(d["roc"], dtype=float)
     cdf = np.array(d["commit_cdf"], dtype=float)
 
-    fig, ax = plt.subplots(figsize=(4.2, 3.0))
-    ax.plot(xs, cdf, color="#2c3e50", lw=1.6, label="commitment CDF (conf>=0.8)")
-    ax.plot(xs, roc, color="#e74c3c", lw=1.6, label="detection ROC-AUC (still-masked)")
-    ax.plot(xs, d["pr"], color="#e67e22", lw=0.9, ls="--", label="detection PR-AUC")
-    ax.axhline(d["base_rate"], color="#e67e22", lw=0.6, ls=":", alpha=0.7,
+    fig, ax = plt.subplots(figsize=(4.4, 3.0))
+    ax.plot(xs, cdf, color="#2c3e50", lw=1.8, label="commitment CDF (first unmask)")
+    ax.plot(xs, roc, color="#e74c3c", lw=1.8, label="detection ROC-AUC (still-masked)")
+    ax.plot(xs, d["pr"], color="#e67e22", lw=1.0, ls="--", label="detection PR-AUC")
+    ax.axhline(d["base_rate"], color="#7f8c8d", lw=0.8, ls=":",
                label="no-skill (EM=%.2f)" % d["base_rate"])
-    # shade DCL area-between
-    det_lo = np.nanmin(roc); det_hi = np.nanmax(roc)
-    det_norm = (roc - det_lo) / (det_hi - det_lo + 1e-12)
-    ax.fill_between(xs, np.nan_to_num(det_norm), cdf, where=~np.isnan(roc),
-                    color="#f1c40f", alpha=0.18, lw=0, label="DCL area")
-    txt = "DCL_area=%.2f (sign-stable %.0f%%)\ncommitted@detection=%.0f%%" % (
-        d["dcl_area"], 100 * d["dcl_sign_stability"], 100 * d["committed_fraction_at_detection"])
-    ax.text(0.03, 0.97, txt, transform=ax.transAxes, fontsize=6.5, va="top",
-            bbox=dict(boxstyle="round", fc="white", ec="0.7", lw=0.5))
+    # Subtle reference lines at the detection peak and the commitment median.
+    # The quantitative summary lives in the caption, not in an on-figure box,
+    # and the all-censored 3x3 DCL inset (detection never clears ROC 0.70) is
+    # dropped because it carried no readable content.
+    pk = int(np.nanargmax(roc))
+    cmed = next((t for t in range(T) if cdf[t] >= 0.5), T)
+    ax.axvline(pk, color="#e74c3c", lw=0.7, ls=":", alpha=0.45)
+    ax.axvline(cmed, color="#2c3e50", lw=0.7, ls=":", alpha=0.45)
     ax.set_xlabel("Denoising step")
     ax.set_ylabel("AUC / committed fraction")
+    ax.set_xlim(0, T - 1)
     ax.set_ylim(0, 1.02)
-    ax.set_title("RQ3 Exp2 — detect-before-commit, %s" % cap_n)
-    ax.legend(loc="center right", frameon=False)
-
-    # 3x3 sensitivity inset
-    surf = d["dcl_sensitivity"]
-    ds = [0.70, 0.75, 0.80]; cs = [0.25, 0.50, 0.75]
-    M = np.full((3, 3), np.nan)
-    for i, dd in enumerate(ds):
-        for j, cc in enumerate(cs):
-            v = surf.get("d%.2f_c%.2f" % (dd, cc))
-            M[i, j] = np.nan if v is None else v
-    iax = fig.add_axes([0.66, 0.18, 0.22, 0.22])
-    im = iax.imshow(M, cmap="RdBu_r", vmin=-T / 2, vmax=T / 2, aspect="auto")
-    iax.set_xticks(range(3)); iax.set_xticklabels(["25", "50", "75"], fontsize=5)
-    iax.set_yticks(range(3)); iax.set_yticklabels(["70", "75", "80"], fontsize=5)
-    iax.set_xlabel("commit %", fontsize=5); iax.set_ylabel("detect %", fontsize=5)
-    iax.set_title("t_det - t_commit", fontsize=5)
-    for i in range(3):
-        for j in range(3):
-            s = "cens" if np.isnan(M[i, j]) else "%.0f" % M[i, j]
-            iax.text(j, i, s, ha="center", va="center", fontsize=4.5)
+    # no title -- the paper caption carries it
+    ax.legend(loc="upper left", frameon=True, framealpha=0.9, fontsize=7,
+              borderpad=0.4, handlelength=1.8, labelspacing=0.3)
     save(fig, fig_dir, "fig_rq3_exp2_dcl")
 
 

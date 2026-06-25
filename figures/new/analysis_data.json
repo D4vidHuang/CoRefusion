@@ -1,0 +1,365 @@
+{
+  "deob": {
+    "DiffuCoder-7B|all-masked": {
+      "model": "DiffuCoder-7B",
+      "mode": "all-masked",
+      "n_groups": 46655,
+      "consistency_rate": 0.15357410781266745,
+      "em_gated": 0.01798306719537027,
+      "em_consistent": 0.11709699930216329,
+      "fuzzy_cons": 0.3004554061569157,
+      "qual_cons": 0.801358448417501,
+      "copy_all": 0.007887686207266102,
+      "copy_among_wrong": 0.007377335428671207,
+      "n_wrong": 45816
+    },
+    "DiffuCoder-7B|target-only": {
+      "model": "DiffuCoder-7B",
+      "mode": "target-only",
+      "n_groups": 958,
+      "consistency_rate": 0.581419624217119,
+      "em_gated": 0.014613778705636743,
+      "em_consistent": 0.025134649910233394,
+      "fuzzy_cons": 0.05505685218432077,
+      "qual_cons": 0.12265406646017059,
+      "copy_all": 0.4509394572025052,
+      "copy_among_wrong": 0.4576271186440678,
+      "n_wrong": 944
+    },
+    "DreamCoder-7B|all-masked": {
+      "model": "DreamCoder-7B",
+      "mode": "all-masked",
+      "n_groups": 46655,
+      "consistency_rate": 0.15743221519665632,
+      "em_gated": 0.01937627263958847,
+      "em_consistent": 0.12307692307692308,
+      "fuzzy_cons": 0.31719138982455364,
+      "qual_cons": 0.8910317157672837,
+      "copy_all": 0.006773121851891544,
+      "copy_among_wrong": 0.006360516710017267,
+      "n_wrong": 45751
+    },
+    "DreamCoder-7B|target-only": {
+      "model": "DreamCoder-7B",
+      "mode": "target-only",
+      "n_groups": 958,
+      "consistency_rate": 0.5469728601252609,
+      "em_gated": 0.026096033402922755,
+      "em_consistent": 0.04770992366412214,
+      "fuzzy_cons": 0.10073155216284987,
+      "qual_cons": 0.22317268185588796,
+      "copy_all": 0.4112734864300626,
+      "copy_among_wrong": 0.42229367631296894,
+      "n_wrong": 933
+    }
+  },
+  "deob_buckets": {
+    "DiffuCoder-7B": {
+      "1-10": [
+        0.12540343915343916,
+        120
+      ],
+      "11-20": [
+        0.1021738971290333,
+        167
+      ],
+      "21-50": [
+        0.039807556239940235,
+        314
+      ],
+      "51-100": [
+        0.00865119945859233,
+        234
+      ],
+      "100+": [
+        0.00017410667240913232,
+        91
+      ]
+    },
+    "DreamCoder-7B": {
+      "1-10": [
+        0.13860119047619046,
+        120
+      ],
+      "11-20": [
+        0.0975416801856801,
+        167
+      ],
+      "21-50": [
+        0.042088323920359993,
+        314
+      ],
+      "51-100": [
+        0.010675149956232487,
+        234
+      ],
+      "100+": [
+        0.0,
+        91
+      ]
+    }
+  },
+  "rq1": {
+    "CodeGemma-2B": {
+      "model": "CodeGemma-2B",
+      "arch": "Decoder-only (FIM)",
+      "n": 1000,
+      "consistency_rate": 0.326,
+      "em_gated": 0.039,
+      "em_consistent": 0.1196319018404908,
+      "fuzzy_cons": 0.15350204498977504,
+      "qual_cons": 0.05450372735648809
+    },
+    "CodeGemma-7B": {
+      "model": "CodeGemma-7B",
+      "arch": "Decoder-only (FIM)",
+      "n": 1000,
+      "consistency_rate": 0.563,
+      "em_gated": 0.061,
+      "em_consistent": 0.108348134991119,
+      "fuzzy_cons": 0.13463587921847248,
+      "qual_cons": 0.03429105623129236
+    },
+    "CodeLlama-13B": {
+      "model": "CodeLlama-13B",
+      "arch": "Decoder-only (FIM)",
+      "n": 1000,
+      "consistency_rate": 0.61,
+      "em_gated": 0.136,
+      "em_consistent": 0.22295081967213115,
+      "fuzzy_cons": 0.2798360655737705,
+      "qual_cons": 0.07049005261706173
+    },
+    "CodeLlama-7B": {
+      "model": "CodeLlama-7B",
+      "arch": "Decoder-only (FIM)",
+      "n": 1000,
+      "consistency_rate": 0.58,
+      "em_gated": 0.137,
+      "em_consistent": 0.23620689655172414,
+      "fuzzy_cons": 0.31373563218390804,
+      "qual_cons": 0.07455732200104383
+    },
+    "CodeT5-base": {
+      "model": "CodeT5-base",
+      "arch": "Encoder-decoder",
+      "n": 1000,
+      "consistency_rate": 0.301,
+      "em_gated": 0.069,
+      "em_consistent": 0.2292358803986711,
+      "fuzzy_cons": 0.32895902547065337,
+      "qual_cons": 0.09367777832431258
+    },
+    "CodeT5-large": {
+      "model": "CodeT5-large",
+      "arch": "Encoder-decoder",
+      "n": 1000,
+      "consistency_rate": 0.428,
+      "em_gated": 0.1,
+      "em_consistent": 0.2336448598130841,
+      "fuzzy_cons": 0.3651479750778816,
+      "qual_cons": 0.10380497819415554
+    },
+    "CodeT5-small": {
+      "model": "CodeT5-small",
+      "arch": "Encoder-decoder",
+      "n": 1000,
+      "consistency_rate": 0.164,
+      "em_gated": 0.041,
+      "em_consistent": 0.25,
+      "fuzzy_cons": 0.4147357723577236,
+      "qual_cons": 0.1613595315559089
+    },
+    "CodeT5p-16B": {
+      "model": "CodeT5p-16B",
+      "arch": "Encoder-decoder",
+      "n": 1000,
+      "consistency_rate": 0.25,
+      "em_gated": 0.095,
+      "em_consistent": 0.38,
+      "fuzzy_cons": 0.5332,
+      "qual_cons": 0.1675762407545043
+    },
+    "CodeT5p-2B": {
+      "model": "CodeT5p-2B",
+      "arch": "Encoder-decoder",
+      "n": 1000,
+      "consistency_rate": 0.0,
+      "em_gated": 0.0,
+      "em_consistent": 0,
+      "fuzzy_cons": 0,
+      "qual_cons": 0
+    },
+    "DeepSeek-Coder-1.3B": {
+      "model": "DeepSeek-Coder-1.3B",
+      "arch": "Decoder-only (FIM)",
+      "n": 1000,
+      "consistency_rate": 0.483,
+      "em_gated": 0.108,
+      "em_consistent": 0.2236024844720497,
+      "fuzzy_cons": 0.2837474120082816,
+      "qual_cons": 0.07573739551150553
+    },
+    "DeepSeek-Coder-6.7B": {
+      "model": "DeepSeek-Coder-6.7B",
+      "arch": "Decoder-only (FIM)",
+      "n": 1000,
+      "consistency_rate": 0.548,
+      "em_gated": 0.087,
+      "em_consistent": 0.15875912408759124,
+      "fuzzy_cons": 0.20340632603406325,
+      "qual_cons": 0.04977416211644115
+    },
+    "DiffuCoder-7B": {
+      "model": "DiffuCoder-7B",
+      "arch": "dLLM (fixed-canvas)",
+      "n": 1000,
+      "consistency_rate": 0.0,
+      "em_gated": 0.0,
+      "em_consistent": 0,
+      "fuzzy_cons": 0,
+      "qual_cons": 0
+    },
+    "DiffusionGemma-26B-A4B": {
+      "model": "DiffusionGemma-26B-A4B",
+      "arch": "dLLM (block-AR)",
+      "n": 1000,
+      "consistency_rate": 0.0,
+      "em_gated": 0.0,
+      "em_consistent": 0,
+      "fuzzy_cons": 0,
+      "qual_cons": 0
+    },
+    "DreamCoder-7B": {
+      "model": "DreamCoder-7B",
+      "arch": "dLLM (fixed-canvas)",
+      "n": 1000,
+      "consistency_rate": 0.0,
+      "em_gated": 0.0,
+      "em_consistent": 0,
+      "fuzzy_cons": 0,
+      "qual_cons": 0
+    },
+    "DreamOn-7B": {
+      "model": "DreamOn-7B",
+      "arch": "dLLM (variable canvas)",
+      "n": 1000,
+      "consistency_rate": 0.541,
+      "em_gated": 0.087,
+      "em_consistent": 0.16081330868761554,
+      "fuzzy_cons": 0.47273567467652494,
+      "qual_cons": 0.16205106026351715
+    },
+    "Qwen2.5-Coder-1.5B": {
+      "model": "Qwen2.5-Coder-1.5B",
+      "arch": "Decoder-only (FIM)",
+      "n": 1000,
+      "consistency_rate": 0.438,
+      "em_gated": 0.089,
+      "em_consistent": 0.20319634703196346,
+      "fuzzy_cons": 0.2715970863231137,
+      "qual_cons": 0.07475522276554238
+    },
+    "Qwen2.5-Coder-14B": {
+      "model": "Qwen2.5-Coder-14B",
+      "arch": "Decoder-only (FIM)",
+      "n": 1000,
+      "consistency_rate": 0.544,
+      "em_gated": 0.082,
+      "em_consistent": 0.15073529411764705,
+      "fuzzy_cons": 0.18017769607843137,
+      "qual_cons": 0.047313150474895385
+    },
+    "Qwen2.5-Coder-3B": {
+      "model": "Qwen2.5-Coder-3B",
+      "arch": "Decoder-only (FIM)",
+      "n": 1000,
+      "consistency_rate": 0.371,
+      "em_gated": 0.09,
+      "em_consistent": 0.24258760107816713,
+      "fuzzy_cons": 0.3161340007701194,
+      "qual_cons": 0.0946904446752663
+    },
+    "Qwen2.5-Coder-7B": {
+      "model": "Qwen2.5-Coder-7B",
+      "arch": "Decoder-only (FIM)",
+      "n": 1000,
+      "consistency_rate": 0.449,
+      "em_gated": 0.107,
+      "em_consistent": 0.2383073496659243,
+      "fuzzy_cons": 0.30056916604800793,
+      "qual_cons": 0.07473666686456328
+    },
+    "StarCoder2-15B": {
+      "model": "StarCoder2-15B",
+      "arch": "Decoder-only (FIM)",
+      "n": 1000,
+      "consistency_rate": 0.399,
+      "em_gated": 0.098,
+      "em_consistent": 0.24561403508771928,
+      "fuzzy_cons": 0.35029239766081877,
+      "qual_cons": 0.12018873530439624
+    },
+    "StarCoder2-3B": {
+      "model": "StarCoder2-3B",
+      "arch": "Decoder-only (FIM)",
+      "n": 1000,
+      "consistency_rate": 0.209,
+      "em_gated": 0.039,
+      "em_consistent": 0.18660287081339713,
+      "fuzzy_cons": 0.3817384370015949,
+      "qual_cons": 0.11655487072112106
+    },
+    "StarCoder2-7B": {
+      "model": "StarCoder2-7B",
+      "arch": "Decoder-only (FIM)",
+      "n": 1000,
+      "consistency_rate": 0.175,
+      "em_gated": 0.035,
+      "em_consistent": 0.2,
+      "fuzzy_cons": 0.4012380952380952,
+      "qual_cons": 0.1215273012523044
+    }
+  },
+  "dreamon_java": {
+    "7B-canvas (800, sites 200-999)": {
+      "n": 800,
+      "site_em": 0.11333659013190034,
+      "first": 0.17125,
+      "any": 0.22625,
+      "consistency_rate": 0.5275,
+      "strict_em": 0.1025
+    },
+    "7B-placeholder (1000)": {
+      "n": 1000,
+      "site_em": 0.005705394190871369,
+      "first": 0.019,
+      "any": 0.039,
+      "consistency_rate": 0.865,
+      "strict_em": 0.01
+    },
+    "7B-base DreamOn (unified RQ1)": {
+      "n": 1000,
+      "site_em": null,
+      "first": null,
+      "any": null,
+      "consistency_rate": 0.541,
+      "strict_em": 0.087
+    }
+  },
+  "thesis": {
+    "table5": {
+      "DiffuCoder-7B": {
+        "rq1": 31.1,
+        "all_masked": 12.2,
+        "target_only": 3.1
+      },
+      "DreamCoder-7B": {
+        "rq1": 33.2,
+        "all_masked": 13.9,
+        "target_only": 4.1
+      }
+    },
+    "copy_bias_pct": 71.3
+  }
+}
