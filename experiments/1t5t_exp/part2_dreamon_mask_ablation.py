@@ -41,6 +41,7 @@ from datetime import datetime
 
 import torch
 from transformers import AutoTokenizer, AutoModel
+from tqdm import tqdm
 
 # repo root on path so we can import the DreamOn benchmark machinery
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -129,7 +130,7 @@ def main():
         MODEL_ID, torch_dtype=torch.bfloat16 if DEVICE == "cuda" else torch.float32,
         trust_remote_code=True,
     ).to(DEVICE).eval()
-    print(f"  loaded in {time.time()-t0:.1f}s")
+    print(f"  loaded in {time.time()-t0:.1f}s", flush=True)
 
     summary = []
     try:
@@ -137,10 +138,11 @@ def main():
             if args.max_new_tokens < k:
                 print(f"  [skip k={k}] max-new-tokens {args.max_new_tokens} < k")
                 continue
-            print(f"\n  ── k={k} {'─'*48}")
+            print(f"\n  ── k={k} {'─'*48}", flush=True)
             rows = []
             fc = ac = mc = errors = 0
-            for i, row in enumerate(data):
+            pbar = tqdm(data, desc=f"k={k}", ncols=90, mininterval=5.0)
+            for i, row in enumerate(pbar):
                 gt = row["ground_truth"]
                 try:
                     site_preds, n_win = bdo.predict_one(
@@ -170,6 +172,13 @@ def main():
                         print(f"    err {row['id']}: {e}")
                 if (i + 1) % CACHE_CLEAR_INTERVAL == 0 and torch.cuda.is_available():
                     torch.cuda.empty_cache()
+                # live running EM on the bar + a flushed milestone every 100 to .out
+                done = i + 1
+                pbar.set_postfix_str(f"EM={100*fc/done:.1f}% err={errors}")
+                if done % 100 == 0:
+                    print(f"    k={k}: {done}/{len(data)}  EM_so_far={100*fc/done:.1f}%  "
+                          f"errors={errors}", flush=True)
+            pbar.close()
 
             n = len(data)
             em_first = 100.0 * fc / n if n else 0.0

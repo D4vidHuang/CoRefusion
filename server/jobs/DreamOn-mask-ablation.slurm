@@ -26,7 +26,7 @@ echo "=== node:$(hostname) job:${SLURM_JOB_ID:-NA} DreamOn mask ablation ==="
 nvidia-smi || true
 python -c "import torch,transformers; print('torch',torch.__version__,'| tfm',transformers.__version__,'| cuda',torch.cuda.is_available())"
 
-srun python experiments/1t5t_exp/part2_dreamon_mask_ablation.py "$@"
+srun python -u experiments/1t5t_exp/part2_dreamon_mask_ablation.py "$@"
 
 echo "=== summary (results/1t5t_exp/dreamon_mask_ablation_summary.csv) ==="
 cat results/1t5t_exp/dreamon_mask_ablation_summary.csv 2>/dev/null || true
