@@ -41,10 +41,12 @@ import gc
 import re
 import time
 import argparse
+import random
 from datetime import datetime
 
 import torch
 import numpy as np
+from tqdm import tqdm
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _REPO = os.path.dirname(_HERE)
@@ -114,7 +116,11 @@ def configure(model, steps, max_field, stop_bool_fields, stop_thresh_fields, ver
 def main():
     ap = argparse.ArgumentParser(description="DiffusionGemma diffusion-step sweep.")
     ap.add_argument("--data", default=DATA_PATH)
-    ap.add_argument("--max-samples", type=int, default=100)
+    ap.add_argument("--max-samples", type=int, default=None, help="legacy: first N rows")
+    ap.add_argument("--sample", type=int, default=100,
+                    help="random subsample N with a FIXED seed -> same set as the DreamCoder "
+                         "job (seed 42) for a fair cross-model comparison. 0 = use all.")
+    ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--steps", nargs="+", type=int, default=DEFAULT_GRID)
     ap.add_argument("--max-steps-field", default=None, help="override max-steps gen-config field")
     ap.add_argument("--early-stop-fields", default=None,
@@ -133,6 +139,10 @@ def main():
     print("=" * 68)
 
     data = bdg.load_data(args.data, args.max_samples)
+    if args.sample and 0 < args.sample < len(data):
+        data = random.Random(args.seed).sample(data, args.sample)
+        print(f"  randomly sampled {len(data)} rows (seed={args.seed}); "
+              f"first ids: {[r['id'] for r in data[:6]]}", flush=True)
     print(f"  {len(data)} samples")
 
     t0 = time.time()
@@ -184,7 +194,8 @@ def main():
             configure(model, steps, max_field, stop_bool, stop_thresh, verbose=True)
             correct = errors = 0
             times = []
-            for i, row in enumerate(data):
+            pbar = tqdm(data, desc=f"steps={steps}", ncols=90, mininterval=5.0)
+            for i, row in enumerate(pbar):
                 gt = row["target"]
                 try:
                     t1 = time.perf_counter()
@@ -205,9 +216,11 @@ def main():
                              "ground_truth": gt, "prediction": pred, "correct": ok,
                              "time_per_sample": f"{dt:.4f}"})
                 df.flush()
+                pbar.set_postfix_str(f"EM={100*correct/(i+1):.1f}% err={errors}")
                 if (i + 1) % 20 == 0:
                     print(f"    steps={steps}: {i+1}/{len(data)}  EM_so_far={100*correct/(i+1):.1f}%",
                           flush=True)
+            pbar.close()
             n = len(data)
             em = correct / n if n else 0.0
             mean_t = float(np.mean(times)) if times else float("nan")

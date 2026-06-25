@@ -82,6 +82,7 @@ import csv
 import gc
 import re
 import argparse
+import random
 import time
 import numpy as np
 from datetime import datetime
@@ -283,6 +284,7 @@ def run_experiment(
     hf_repo=None,
     hf_token=None,
     seed=42,
+    sample=100,
 ):
     """
     Main entry point.
@@ -309,6 +311,12 @@ def run_experiment(
 
     print(f"Dataset     : {DATA_PATH}")
     data = load_data(DATA_PATH, max_samples)
+    if sample and 0 < sample < len(data):
+        # fixed seed -> identical subset in every model's job, so DreamCoder /
+        # DiffuCoder / DiffusionGemma curves are compared on the SAME samples.
+        data = random.Random(seed).sample(data, sample)
+        print(f"Subsample   : {len(data)} random rows (seed={seed}); "
+              f"first ids: {[r['id'] for r in data[:6]]}")
     print(f"Samples     : {len(data)}")
     print(f"Step grid   : {steps_grid}  (reference = {ref_steps})")
     print(f"Device      : {DEVICE}")
@@ -566,6 +574,10 @@ if __name__ == "__main__":
         help="Random seed for reproducibility (default: 42).",
     )
     parser.add_argument(
+        "--sample", type=int, default=100, metavar="N",
+        help="Random subsample N rows with the fixed seed -> SAME set across models. 0 = use all.",
+    )
+    parser.add_argument(
         "--hf-repo", type=str, default=None, metavar="REPO",
         help="HuggingFace dataset repo ID to upload results (e.g. user/repo).",
     )
@@ -592,4 +604,5 @@ if __name__ == "__main__":
         hf_repo=args.hf_repo,
         hf_token=args.hf_token,
         seed=args.seed,
+        sample=args.sample,
     )
