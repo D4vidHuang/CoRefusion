@@ -1,60 +1,101 @@
-"""
-Figure 7 — Diffusion step sensitivity of DiffuCoder-7B-Base on the RefineID test set.
-Two panels:
-  (a) EM (%) vs diffusion steps T (log2 x-axis), with reference line + annotations.
-  (b) per-sample latency (s) vs T on a log-log scale (near-linear).
+"""Fig 6 (paper) / fig07 — Diffusion step sensitivity on the RefineID test set.
 
-Single model -> BLUE line+markers throughout. Data are from Table IV.
+DATA-DRIVEN: reads the latest step-sweep summary written by
+    experiments/exp_diffusion_steps_benchmark.py
+    -> results/diffusion_steps_benchmark/summary_<ts>.csv
+and plots one line per model present (EM vs steps, and per-sample latency vs
+steps). If no summary is found it falls back to the published DiffuCoder-7B-Base
+numbers so the figure still builds.
+
+NOTE: the step sweep is only well-defined for the FIXED-CANVAS dLLMs
+(DiffuCoder-7B, DreamCoder-7B), which expose ``diffusion_generate(steps=T)``.
+DreamOn-7B (variable canvas, transfers tokens until convergence) and
+DiffusionGemma-26B-A4B (block-AR, internal entropy-bounded sampler) do not
+expose the same free step knob, so they are not part of this figure.
 """
+import os
 import sys
-sys.path.insert(0, "/Users/davidhuang/Desktop/CoRefusion/figures/rebuilt")
+import csv
+import glob
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from corefusion_style import (BLUE, ORANGE, INK, GRAY, GRID,
-    BLUE_DARK, BLUE_MID, BLUE_LIGHT, BLUE_PALE,
-    ORANGE_DARK, ORANGE_MID, ORANGE_LIGHT, ORANGE_PALE,
-    apply_style, blue_ramp, orange_ramp, savefig, lighten, CMAP_DIV)
+    BLUE_DARK, ORANGE_DARK, apply_style, savefig)
 apply_style()
 
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.ticker import FixedLocator, FixedFormatter, NullLocator
 
-# ------------------------------------------------------------------ Table IV
-T    = np.array([1, 2, 4, 8, 16, 32, 64], dtype=float)
-EM   = np.array([26.20, 30.10, 30.30, 30.50, 30.60, 30.80, 31.00])
-TIME = np.array([0.313, 0.618, 1.238, 2.477, 4.957, 9.916, 19.831])
+REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+SUMMARY_GLOB = os.path.join(REPO, "results", "diffusion_steps_benchmark", "summary_*.csv")
 
-REF_EM = 31.0  # reference value at T=64
+CYAN = "#00A6D6"
+COLOR = {"DiffuCoder-7B": BLUE, "DiffuCoder-7B-Base": BLUE,
+         "DreamCoder-7B": ORANGE, "DreamCoder-7B-Base": ORANGE}
+LABEL = {"DiffuCoder-7B": "DiffuCoder-7B-Base", "DreamCoder-7B": "DreamCoder-7B"}
+ORDER = ["DiffuCoder-7B", "DiffuCoder-7B-Base", "DreamCoder-7B"]
 
-# ------------------------------------------------------------------ figure
+# ── published DiffuCoder-7B-Base curve (fallback / authoritative) ────────────
+PUBLISHED = {"DiffuCoder-7B-Base": {
+    "steps": [1, 2, 4, 8, 16, 32, 64],
+    "em":    [26.20, 30.10, 30.30, 30.50, 30.60, 30.80, 31.00],   # %
+    "time":  [0.313, 0.618, 1.238, 2.477, 4.957, 9.916, 19.831],  # s/sample
+}}
+
+
+def load_series():
+    """model -> {steps, em(%), time(s)} from the newest summary CSV (+ published)."""
+    series = {}
+    files = sorted(glob.glob(SUMMARY_GLOB))
+    if files:
+        by = {}
+        for r in csv.DictReader(open(files[-1], encoding="utf-8")):
+            m = r["model"]
+            by.setdefault(m, []).append((int(r["steps"]),
+                                         float(r["exact_match_rate"]) * 100,
+                                         float(r["mean_time_per_sample"])))
+        for m, rows in by.items():
+            rows.sort()
+            series[m] = {"steps": [s for s, _, _ in rows],
+                         "em": [e for _, e, _ in rows],
+                         "time": [t for _, _, t in rows]}
+        print(f"loaded {len(series)} model(s) from {os.path.basename(files[-1])}: {list(series)}")
+    # ensure DiffuCoder is shown even if it was not re-run this round
+    if not any("DiffuCoder" in m for m in series):
+        series.update(PUBLISHED)
+        print("no DiffuCoder run found -> using published DiffuCoder-7B-Base curve")
+    return series
+
+
+series = load_series()
+models = [m for m in ORDER if m in series] + [m for m in series if m not in ORDER]
+
+# ── figure ──────────────────────────────────────────────────────────────────
 fig, (axL, axR) = plt.subplots(1, 2, figsize=(11.0, 4.3))
 
-# ============================================================== Panel (a) EM
-axL.axhline(REF_EM, color=GRAY, ls="--", lw=1.3, zorder=1)
-axL.plot(T, EM, color=BLUE, marker="o", ms=6.5, lw=2.2, zorder=3,
-         label="DiffuCoder-7B-Base")
+all_steps = sorted({s for m in models for s in series[m]["steps"]})
+xt = np.array(all_steps, dtype=float)
 
-# reference-line label
-axL.text(64, REF_EM + 0.12, "Reference (T=64)", color=GRAY,
-         ha="right", va="bottom", fontsize=9)
+for i, m in enumerate(models):
+    col = COLOR.get(m, CYAN)
+    s = np.array(series[m]["steps"], float)
+    em = np.array(series[m]["em"], float)
+    tm = np.array(series[m]["time"], float)
+    lab = LABEL.get(m, m)
+    axL.plot(s, em, color=col, marker="o", ms=6.0, lw=2.2, zorder=3, label=lab)
+    # faint plateau reference at this model's largest-step EM
+    axL.axhline(em[np.argmax(s)], color=col, ls="--", lw=1.0, alpha=0.4, zorder=1)
+    axR.plot(s, tm, color=col, marker="o", ms=6.0, lw=2.2, zorder=3, label=lab)
 
-# annotate first point (the dip)
-axL.annotate("26.2% (step=1)",
-             xy=(1, 26.20), xytext=(1.7, 27.4),
-             color=BLUE_DARK, fontsize=9, ha="left", va="center",
-             arrowprops=dict(arrowstyle="-", color=BLUE_DARK, lw=1.0,
-                             connectionstyle="arc3,rad=-0.2"))
-
-# plateau / speedup notes (orange)
-axL.text(8, 29.55, "~0.9 pp plateau", color=ORANGE_DARK,
-         fontsize=9.5, ha="center", va="top", style="italic")
-axL.text(8, 28.95, "32x speedup at T=2 vs T=64", color=ORANGE,
-         fontsize=8.8, ha="center", va="top")
-
+# ── panel (a) EM ────────────────────────────────────────────────────────────
 axL.set_xscale("log", base=2)
-axL.set_xlim(0.85, 80)
-axL.set_ylim(25, 32)
-axL.set_xticks(T)
-axL.xaxis.set_major_formatter(FixedFormatter([str(int(t)) for t in T]))
+axL.set_xlim(0.85, max(xt) * 1.25)
+ymin = min(min(series[m]["em"]) for m in models)
+ymax = max(max(series[m]["em"]) for m in models)
+axL.set_ylim(np.floor(ymin) - 1, np.ceil(ymax) + 1)
+axL.set_xticks(xt)
+axL.xaxis.set_major_formatter(FixedFormatter([str(int(t)) for t in xt]))
 axL.xaxis.set_minor_locator(NullLocator())
 axL.set_xlabel("Diffusion steps $T$ (log scale)")
 axL.set_ylabel("Exact Match (%)")
@@ -63,23 +104,18 @@ axL.legend(loc="lower right", frameon=False)
 axL.grid(True, axis="y", color=GRID, lw=0.9)
 axL.set_axisbelow(True)
 
-# ============================================================== Panel (b) time
-axR.plot(T, TIME, color=BLUE, marker="o", ms=6.5, lw=2.2, zorder=3,
-         label="DiffuCoder-7B-Base")
-
+# ── panel (b) latency ───────────────────────────────────────────────────────
 axR.set_xscale("log", base=2)
 axR.set_yscale("log", base=10)
-axR.set_xlim(0.85, 80)
-axR.set_xticks(T)
-axR.xaxis.set_major_formatter(FixedFormatter([str(int(t)) for t in T]))
+axR.set_xlim(0.85, max(xt) * 1.25)
+axR.set_xticks(xt)
+axR.xaxis.set_major_formatter(FixedFormatter([str(int(t)) for t in xt]))
 axR.xaxis.set_minor_locator(NullLocator())
-
 yticks = [0.2, 0.5, 1, 2, 5, 10, 20]
-axR.set_ylim(0.25, 25)
+axR.set_ylim(0.2, 30)
 axR.yaxis.set_major_locator(FixedLocator(yticks))
 axR.yaxis.set_major_formatter(FixedFormatter([f"{v:g}" for v in yticks]))
 axR.yaxis.set_minor_locator(NullLocator())
-
 axR.set_xlabel("Diffusion steps $T$ (log scale)")
 axR.set_ylabel("Time per sample (s)")
 axR.set_title("(b) Per-sample latency vs. diffusion steps", fontsize=11, pad=8)
@@ -88,5 +124,5 @@ axR.grid(True, which="major", axis="both", color=GRID, lw=0.9)
 axR.set_axisbelow(True)
 
 fig.subplots_adjust(left=0.07, right=0.985, bottom=0.13, top=0.92, wspace=0.24)
-
 savefig(fig, "fig07_diffusion_steps")
+plt.close(fig)

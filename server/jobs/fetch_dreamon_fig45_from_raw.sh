@@ -30,6 +30,9 @@ FILES=(
   experiments/benchmark_dreamon.py                        # predict_one（被上面两者复用）
   server/jobs/DreamOn-mask-ablation.slurm                 # 作业（新）
   server/jobs/DreamOn-RQ2-deobf.slurm                     # 作业（新）
+  # --- Fig 6 扩散步数扫描（DiffuCoder/DreamCoder）---
+  experiments/exp_diffusion_steps_benchmark.py            # steps sweep（registry 已含 DreamCoder）
+  server/jobs/DiffStep-sweep.slurm                        # 作业（新，按 MODEL 并行）
   # --- 图/表重生成（可在 DAIC 登录节点或本地跑）---
   analysis/em_by_cardinality.py                           # Fig 4 聚合（新）
   analysis/reproduce_rq2_deobfuscation.py                 # 表 + Fig 8（+DreamOn 自动并入）
