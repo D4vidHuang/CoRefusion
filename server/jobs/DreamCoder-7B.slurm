@@ -13,7 +13,7 @@
 #   sbatch <this-file>                 # 全量
 #   sbatch <this-file> --max-samples 20  # 冒烟（脚本名后的参数原样透传给 runner）
 set -euo pipefail
-source /tudelft.net/staff-umbrella/CoReFusion/CoRefusion/server/env_daic.sh
+source "${SLURM_SUBMIT_DIR:-$PWD}/server/env_daic.sh"
 mkdir -p logs
 MODEL="DreamCoder-7B"
 

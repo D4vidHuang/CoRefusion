@@ -1,6 +1,9 @@
 # CoReFusion — DAIC environment bootstrap (source me, don't execute).
-# 用法 / usage:
-#   source /tudelft.net/staff-umbrella/CoReFusion/CoRefusion/server/env_daic.sh
+# 用法 / usage（在仓库根）:
+#   source server/env_daic.sh
+# PORTABLE: PROJECT_DIR 自动 = 本仓库根，所以 clone 到任何路径都能用。
+# 缓存/venv/pylibs 默认复用旧 CoReFusion umbrella；要换成别的 umbrella:
+#   CF_UMBRELLA=/tudelft.net/staff-umbrella/NA source server/env_daic.sh
 # 必须在每个交互式会话和每个 SLURM job 里 source 一次。
 #
 # WHY: $HOME quota 只有 ~5 MB（DAIC 官方确认），任何写到 $HOME 的 cache 都会爆。
@@ -8,9 +11,14 @@
 # umbrella 共享盘，并激活 umbrella 上由 uv 建好的项目 venv（torch 也由 uv 装，
 # 自带 CUDA 库，所以不再 load DAIC 的 py-torch module）。
 
-# ---- locations -------------------------------------------------------------
-export UMBRELLA="/tudelft.net/staff-umbrella/CoReFusion"
-export PROJECT_DIR="$UMBRELLA/CoRefusion"
+# ---- locations (PORTABLE) --------------------------------------------------
+# PROJECT_DIR 自动从本脚本位置推断（repo 根 = 本文件的上一级），所以仓库 clone 到
+# 任何路径都能用（如 /tudelft.net/staff-umbrella/NA/CoReFusion）。
+# 重型依赖（HF 模型缓存 ~50GB / uv venv / pylibs_dgemma）默认复用旧 CoReFusion
+# umbrella，避免重下；要全新自包含就 export CF_UMBRELLA=<新 umbrella> 再 source。
+_ENV_SELF="${BASH_SOURCE[0]:-$0}"
+export PROJECT_DIR="$(cd "$(dirname "$_ENV_SELF")/.." && pwd)"
+export UMBRELLA="${CF_UMBRELLA:-/tudelft.net/staff-umbrella/CoReFusion}"
 export VENV_DIR="$UMBRELLA/venvs/corefusion"     # legacy（uv 之前的 venv，已弃用）
 
 # ---- redirect ALL caches off $HOME ----------------------------------------
@@ -47,14 +55,19 @@ case ":$PATH:" in *":$UMBRELLA/uv/bin:"*) ;; *) export PATH="$UMBRELLA/uv/bin:$P
 # export HF_TOKEN="hf_xxx"
 
 # ---- python env ------------------------------------------------------------
-# 首选 uv 在仓库里建的 .venv（torch 自带 CUDA 库，不 load py-torch module，避免
-# 和 module torch 的 ABI 冲突）。找不到就退回旧的 module-torch + venv/pylibs。
-UV_VENV="$PROJECT_DIR/.venv"
-if [ -f "$UV_VENV/bin/activate" ]; then
-    # shellcheck disable=SC1090
-    source "$UV_VENV/bin/activate" || true
-    echo "[env_daic] python env: uv venv ($UV_VENV)"
-else
+# 首选本仓库的 .venv；没有就复用旧 CoReFusion umbrella 上现成的 uv venv（这样新
+# clone 不必重建环境）。都没有再退回 legacy module-torch + venv/pylibs。
+_VENV_ACTIVATED=
+for _cand in "$PROJECT_DIR/.venv" "$UMBRELLA/CoRefusion/.venv"; do
+    if [ -f "$_cand/bin/activate" ]; then
+        # shellcheck disable=SC1090
+        source "$_cand/bin/activate" || true
+        echo "[env_daic] python env: uv venv ($_cand)"
+        _VENV_ACTIVATED=1
+        break
+    fi
+done
+if [ -z "$_VENV_ACTIVATED" ]; then
     echo "[env_daic] uv .venv 不存在，退回 legacy module-torch 路径。" >&2
     echo "[env_daic] 建议在 login 节点跑一次: bash server/setup_uv_daic.sh" >&2
     if command -v module >/dev/null 2>&1; then

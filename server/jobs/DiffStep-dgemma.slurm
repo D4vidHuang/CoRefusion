@@ -21,7 +21,7 @@
 #   sbatch --gres=gpu:<type>:1 server/jobs/DiffStep-dgemma.slurm --max-samples 20 --debug   # smoke + dumps generation_config
 #   sbatch --gres=gpu:<type>:1 server/jobs/DiffStep-dgemma.slurm                              # default (100 samples, grid<=48)
 set -euo pipefail
-source /tudelft.net/staff-umbrella/CoReFusion/CoRefusion/server/env_daic.sh
+source "${SLURM_SUBMIT_DIR:-$PWD}/server/env_daic.sh"
 mkdir -p logs
 
 DGEMMA_LIBS="$UMBRELLA/pylibs_dgemma"

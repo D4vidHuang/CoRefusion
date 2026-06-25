@@ -20,7 +20,7 @@
 #   sbatch --gres=gpu:<型名>:1 server/jobs/DiffusionGemma-smoke.slurm            # 默认 5 条
 #   sbatch --gres=gpu:<型名>:1 server/jobs/DiffusionGemma-smoke.slurm --max-samples 10
 set -euo pipefail
-source /tudelft.net/staff-umbrella/CoReFusion/CoRefusion/server/env_daic.sh
+source "${SLURM_SUBMIT_DIR:-$PWD}/server/env_daic.sh"
 mkdir -p logs
 
 # 新 transformers 树 PREPEND（先于主环境钉死的 4.57.1）。检查实际内容而非目录存在。

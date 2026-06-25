@@ -40,7 +40,7 @@
 #   GPU_TYPE=<GRES型名> HF_TOKEN=hf_xxx bash server/jobs/gt_judge_multi.sh
 #   # 全部结束后：python experiments/judge_refineid_ground_truth.py --combine-only
 set -euo pipefail
-source /tudelft.net/staff-umbrella/CoReFusion/CoRefusion/server/env_daic.sh
+source "${SLURM_SUBMIT_DIR:-$PWD}/server/env_daic.sh"
 mkdir -p logs
 
 echo "=== node:$(hostname) job:${SLURM_JOB_ID:-NA} LLM-as-Judge on RefineID ground truth ==="

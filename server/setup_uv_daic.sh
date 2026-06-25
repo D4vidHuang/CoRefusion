@@ -8,7 +8,7 @@
 #
 # 之后 env_daic.sh 会自动激活 $PROJECT_DIR/.venv。
 set -euo pipefail
-source /tudelft.net/staff-umbrella/CoReFusion/CoRefusion/server/env_daic.sh
+source "${SLURM_SUBMIT_DIR:-$PWD}/server/env_daic.sh"
 
 command -v uv >/dev/null 2>&1 || {
     echo "ERROR: 找不到 uv。先把 uv 装到 umbrella：" >&2

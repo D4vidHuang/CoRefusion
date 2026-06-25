@@ -17,7 +17,7 @@
 # gres 用 a40(他用的 gpu:a40:3)。若报 "Invalid GRES",换成 gpu:nvidia_a40:1。
 
 set -euo pipefail
-source /tudelft.net/staff-umbrella/CoReFusion/CoRefusion/server/env_daic.sh
+source "${SLURM_SUBMIT_DIR:-$PWD}/server/env_daic.sh"
 
 echo "=== node : $(hostname) | jobid: ${SLURM_JOB_ID:-NA} ==="
 nvidia-smi || true

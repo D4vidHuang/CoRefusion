@@ -29,7 +29,7 @@
 #   （GRES 型名用  sinfo -o "%N %G" | grep -i 6000  查询）
 # 一卡一 judge 并行 + 事后合并：bash server/jobs/judge_multi_size.sh
 set -euo pipefail
-source /tudelft.net/staff-umbrella/CoReFusion/CoRefusion/server/env_daic.sh
+source "${SLURM_SUBMIT_DIR:-$PWD}/server/env_daic.sh"
 mkdir -p logs
 
 echo "=== node:$(hostname) job:${SLURM_JOB_ID:-NA} LLM-as-Judge (all-site consistency gated) ==="

@@ -22,7 +22,7 @@
 #   MODE=target-only sbatch server/jobs/DreamOn-RQ2-deobf.slurm      # ONE mode only (run the 2 modes
 #   MODE=all-masked  sbatch server/jobs/DreamOn-RQ2-deobf.slurm      #   as parallel jobs; all-masked is slow)
 set -euo pipefail
-source /tudelft.net/staff-umbrella/CoReFusion/CoRefusion/server/env_daic.sh
+source "${SLURM_SUBMIT_DIR:-$PWD}/server/env_daic.sh"
 mkdir -p logs
 
 # MODE env: "all-masked" / "target-only" runs just that one; unset = both.

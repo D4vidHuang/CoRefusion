@@ -67,7 +67,7 @@ EOF
 #   sbatch <this-file>                 # 全量
 #   sbatch <this-file> --max-samples 20  # 冒烟（脚本名后的参数原样透传给 runner）
 set -euo pipefail
-source /tudelft.net/staff-umbrella/CoReFusion/CoRefusion/server/env_daic.sh
+source "${SLURM_SUBMIT_DIR:-$PWD}/server/env_daic.sh"
 mkdir -p logs
 EOF
 
@@ -106,7 +106,7 @@ cat > "$JOBS/aggregate.sh" <<'EOF'
 # 所有单模型 job 跑完后，重新评分 predictions/ 下所有已存在的模型，
 # 生成合并后的 results/unified_refineID/leaderboard.csv。纯 CPU。
 set -euo pipefail
-source /tudelft.net/staff-umbrella/CoReFusion/CoRefusion/server/env_daic.sh
+source "${SLURM_SUBMIT_DIR:-$PWD}/server/env_daic.sh"
 DICT_ARG=""
 for d in /usr/share/dict/words "$UMBRELLA/words.txt"; do
   [ -f "$d" ] && DICT_ARG="--dict $d" && break

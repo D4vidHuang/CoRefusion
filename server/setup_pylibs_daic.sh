@@ -10,7 +10,7 @@
 #
 # 之后 env_daic.sh 会自动把 pylibs 加到 PYTHONPATH。
 set -euo pipefail
-source /tudelft.net/staff-umbrella/CoReFusion/CoRefusion/server/env_daic.sh
+source "${SLURM_SUBMIT_DIR:-$PWD}/server/env_daic.sh"
 
 PYTOOLS="$UMBRELLA/pytools"          # pip/setuptools/wheel 装这里（只在安装时用）
 GETPIP="$TMPDIR/get-pip.py"
@@ -36,7 +36,7 @@ rm -rf "$UMBRELLA"/pylibs/numpy* 2>/dev/null || true
 
 # ---- verify（运行时只需 pylibs，不需要 pytools）---------------------------
 unset PYTHONPATH
-source /tudelft.net/staff-umbrella/CoReFusion/CoRefusion/server/env_daic.sh
+source "${SLURM_SUBMIT_DIR:-$PWD}/server/env_daic.sh"
 echo ""
 echo "=== verify ==="
 python - <<'PY'

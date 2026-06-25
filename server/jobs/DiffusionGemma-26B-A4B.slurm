@@ -19,7 +19,7 @@
 #   sbatch --gres=gpu:<型名>:1 <this-file>                    # 全量
 #   sbatch --gres=gpu:<型名>:1 <this-file> --max-samples 5 --debug   # 冒烟
 set -euo pipefail
-source /tudelft.net/staff-umbrella/CoReFusion/CoRefusion/server/env_daic.sh
+source "${SLURM_SUBMIT_DIR:-$PWD}/server/env_daic.sh"
 mkdir -p logs
 MODEL="DiffusionGemma-26B-A4B"
 

@@ -25,7 +25,7 @@
 #   (2) --steps matches the RQ1/RQ2 generation step count (default 32 = paper RQ3;
 #       the unified runner uses 64). DCL is step-count dependent.
 set -euo pipefail
-source /tudelft.net/staff-umbrella/CoReFusion/CoRefusion/server/env_daic.sh
+source "${SLURM_SUBMIT_DIR:-$PWD}/server/env_daic.sh"
 mkdir -p logs results/rq3_probe figures/new/rq3
 
 echo "=== node:$(hostname) job:${SLURM_JOB_ID:-NA} ==="

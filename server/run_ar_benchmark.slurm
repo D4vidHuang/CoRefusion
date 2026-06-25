@@ -13,7 +13,7 @@
 # qos 默认 normal;若 12h 被拒说明 normal 有更短时限,调小 --time。
 
 set -euo pipefail
-source /tudelft.net/staff-umbrella/CoReFusion/CoRefusion/server/env_daic.sh
+source "${SLURM_SUBMIT_DIR:-$PWD}/server/env_daic.sh"
 mkdir -p logs
 
 # 默认模型,可用 MODEL=... 覆盖。

@@ -19,7 +19,7 @@
 #
 # Output: results/1t5t_exp/dreamon_mask_ablation_summary.csv  (read by fig06).
 set -euo pipefail
-source /tudelft.net/staff-umbrella/CoReFusion/CoRefusion/server/env_daic.sh
+source "${SLURM_SUBMIT_DIR:-$PWD}/server/env_daic.sh"
 mkdir -p logs
 
 echo "=== node:$(hostname) job:${SLURM_JOB_ID:-NA} DreamOn mask ablation ==="

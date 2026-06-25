@@ -21,7 +21,7 @@
 #   # smoke (a few samples, all steps):
 #   MODEL=DreamCoder-7B sbatch server/jobs/DiffStep-sweep.slurm --max-samples 20
 set -euo pipefail
-source /tudelft.net/staff-umbrella/CoReFusion/CoRefusion/server/env_daic.sh
+source "${SLURM_SUBMIT_DIR:-$PWD}/server/env_daic.sh"
 mkdir -p logs
 MODEL="${MODEL:-DreamCoder-7B}"
 

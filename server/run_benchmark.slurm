@@ -21,7 +21,7 @@
 # 说明 normal 有时限,需要更高 qos(你的 account 目前只有 normal)。
 
 set -euo pipefail
-source /tudelft.net/staff-umbrella/CoReFusion/CoRefusion/server/env_daic.sh
+source "${SLURM_SUBMIT_DIR:-$PWD}/server/env_daic.sh"
 
 echo "=== node : $(hostname) | jobid: ${SLURM_JOB_ID:-NA} ==="
 nvidia-smi || true
