@@ -17,10 +17,15 @@
 # DiffusionGemma is block-AR (RQ1-only) and is intentionally NOT run here.
 #
 #   cd /tudelft.net/staff-umbrella/CoReFusion/CoRefusion && mkdir -p logs
-#   sbatch server/jobs/DreamOn-RQ2-deobf.slurm                       # both modes (all-masked then target-only)
-#   sbatch server/jobs/DreamOn-RQ2-deobf.slurm --max-samples 20      # smoke, both modes
-#   MODE=target-only sbatch server/jobs/DreamOn-RQ2-deobf.slurm      # ONE mode only (run the 2 modes
-#   MODE=all-masked  sbatch server/jobs/DreamOn-RQ2-deobf.slurm      #   as parallel jobs; all-masked is slow)
+#   # RECOMMENDED: the two modes as PARALLEL jobs, each on the SAME random 100
+#   # samples (fixed seed) -> all-masked & target-only score the same targets.
+#   MODE=target-only sbatch server/jobs/DreamOn-RQ2-deobf.slurm      # fast
+#   MODE=all-masked  sbatch server/jobs/DreamOn-RQ2-deobf.slurm      # slow (tiled)
+#   # both modes in one job:        sbatch server/jobs/DreamOn-RQ2-deobf.slurm
+#   # full 1000 samples instead:    MODE=all-masked sbatch ... --sample 0
+#
+# Default = random 100 samples (--sample 100 --seed 42; identical set across modes).
+# tqdm bar in .err + flushed heartbeat every 20 in .out + atomic checkpoint every 25.
 set -euo pipefail
 source "${SLURM_SUBMIT_DIR:-$PWD}/server/env_daic.sh"
 mkdir -p logs

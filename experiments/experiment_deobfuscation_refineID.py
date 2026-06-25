@@ -35,6 +35,7 @@ import re
 import gc
 import json
 import argparse
+import random
 import time
 from datetime import datetime
 from typing import List, Dict, Tuple, Optional
@@ -606,7 +607,7 @@ def save_deobf_results(results, out_file):
 # ---- Main Experiment --------------------------------------------------------
 
 def run_experiment(target_models=None, max_samples=None, hf_repo=None, hf_token=None,
-                   mode="all-masked"):
+                   mode="all-masked", sample=100, seed=42):
     os.makedirs(RESULTS_DIR, exist_ok=True)
 
     if target_models:
@@ -619,6 +620,12 @@ def run_experiment(target_models=None, max_samples=None, hf_repo=None, hf_token=
 
     print(f"Loading data from {DATA_PATH}...")
     data = load_data(DATA_PATH, max_samples=max_samples)
+    if sample and 0 < sample < len(data):
+        # fixed seed -> identical subset in BOTH mode jobs, so all-masked and
+        # target-only score the SAME target positions (the point of RQ2).
+        data = random.Random(seed).sample(data, sample)
+        print(f"Randomly sampled {len(data)} rows (seed={seed}); same set across modes. "
+              f"first ids: {[r['id'] for r in data[:8]]}")
     print(f"Loaded {len(data)} samples.")
     print(f"Mode: {mode}\n")
 
@@ -682,7 +689,7 @@ def run_experiment(target_models=None, max_samples=None, hf_repo=None, hf_token=
                 em_now = (100.0 * total_id_correct / total_id_count) if total_id_count else 0.0
                 print(f"    [{model_name}/{mode}] {n_seen}/{len(data)}  "
                       f"id-EM={em_now:.1f}%  skip={skipped} err={errors}", flush=True)
-            if n_seen % 100 == 0:          # checkpoint partial results (timeout-safe)
+            if n_seen % 25 == 0:           # checkpoint partial results (timeout-safe)
                 save_deobf_results(results, out_file)
 
             try:
@@ -880,7 +887,11 @@ if __name__ == "__main__":
         default="all-masked",
         help="Experiment mode (default: all-masked).",
     )
-    parser.add_argument("--max-samples", type=int, default=None)
+    parser.add_argument("--max-samples", type=int, default=None, help="legacy: first N rows")
+    parser.add_argument("--sample", type=int, default=100,
+                        help="random subsample N with a FIXED seed -> SAME set in every mode "
+                             "job (so all-masked vs target-only are comparable). 0 = use all.")
+    parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--hf-repo", type=str, default=None)
     parser.add_argument("--hf-token", type=str, default=os.environ.get("HF_TOKEN"))
     parser.add_argument("--list-models", action="store_true")
@@ -899,4 +910,6 @@ if __name__ == "__main__":
         hf_repo=args.hf_repo,
         hf_token=args.hf_token,
         mode=args.mode,
+        sample=args.sample,
+        seed=args.seed,
     )
