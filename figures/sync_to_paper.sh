@@ -32,6 +32,8 @@ copy "$HERE/figures/rebuilt/fig04_rq2_example.pdf" "fig04_rq2_example.pdf"
 copy "$HERE/figures/rebuilt/fig05_em_by_cardinality.pdf" "fig05_em_by_cardinality.pdf"
 # Fig 5 (paper): mask-token count ablation (+ DreamOn once its run lands)
 copy "$HERE/figures/rebuilt/fig06_mask_count_ablation.pdf" "fig06_mask_count_ablation.pdf"
+# Fig 6 (paper): diffusion-step sensitivity (+ DreamCoder once its sweep lands)
+copy "$HERE/figures/rebuilt/fig07_diffusion_steps.pdf" "fig07_diffusion_steps.pdf"
 # Fig 7 (paper): LJ-vs-EM / LJ-vs-CIS scatter (bigger text)
 copy "$HERE/figures/new/benchmark_cis_scatter.pdf" "benchmark_cis_scatter.pdf"
 # Fig 8 (paper): EM/CIS/LJ rank bump chart (unique ranks -> no label overlap)
