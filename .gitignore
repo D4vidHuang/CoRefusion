@@ -25,3 +25,6 @@ logs/
 
 # local matplotlib venv for building figures
 .venv-fig/
+
+# uv project venv (created per-machine by setup_uv_daic.sh / setup_fresh.sh)
+.venv/
