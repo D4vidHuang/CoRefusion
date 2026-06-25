@@ -302,7 +302,7 @@ def chip(x_center, color, label, alpha=0.50):
              color="#333", ha='left', va='center')
 
 chip(0.205, C_TARGET, "RefineID target identifier")
-chip(0.510, C_OTHER,  r"other renameables in rename set $\mathcal{S}$")
+chip(0.510, C_OTHER,  r"other renameable identifiers")
 
 # save
 out_pdf = os.path.join(OUTDIR, "fig04_rq2_example.pdf")
