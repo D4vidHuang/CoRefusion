@@ -26,6 +26,8 @@ copy() {  # $1 = source file, $2 = dest basename
 }
 
 echo "Syncing figures -> $DEST"
+# Fig 2 (paper): RQ2 obfuscation example ("rename set", not "smell set")
+copy "$HERE/figures/rebuilt/fig04_rq2_example.pdf" "fig04_rq2_example.pdf"
 # Fig 4 (paper): all-sites EM by cardinality, all models (data-driven)
 copy "$HERE/figures/rebuilt/fig05_em_by_cardinality.pdf" "fig05_em_by_cardinality.pdf"
 # Fig 5 (paper): mask-token count ablation (+ DreamOn once its run lands)

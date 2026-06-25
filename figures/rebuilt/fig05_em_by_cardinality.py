@@ -107,18 +107,31 @@ ax.set_ylabel("All-sites Exact Match (%)")
 ax.set_ylim(0, 80)
 ax.set_yticks(np.arange(0, 81, 10))
 
-# ── grouped legend ────────────────────────────────────────────────────────
-header_d = Line2D([], [], color="none", label="Diffusion LLMs")
-header_f = Line2D([], [], color="none", label="Autoregressive / Seq2Seq")
+# ── grouped legend: two columns, each with its heading on the TOP row ──────
+# matplotlib fills legends column-major, so we pass column 1 then column 2 and
+# pad the shorter column with blank entries to keep both headings aligned at top.
+HEAD_D = "Diffusion LLMs"
+HEAD_F = "Autoregressive / Seq2Seq"
+header_d = Line2D([], [], color="none", label=HEAD_D)
+header_f = Line2D([], [], color="none", label=HEAD_F)
 fam_handles = [h for h in (h_ar, h_s2s) if h is not None]
-handles = [header_d] + dllm_handles + [header_f] + fam_handles
+
+col1 = [header_d] + dllm_handles          # heading + diffusion models
+col2 = [header_f] + fam_handles           # heading + AR/Seq2Seq family means
+nrow = max(len(col1), len(col2))
+def _blank():
+    return Line2D([], [], color="none", label=" ")
+col1 += [_blank() for _ in range(nrow - len(col1))]
+col2 += [_blank() for _ in range(nrow - len(col2))]
+
+handles = col1 + col2                      # column-major: col1 -> left, col2 -> right
 labels = [h.get_label() for h in handles]
 leg = ax.legend(handles, labels, loc="upper right", ncol=2,
                 handlelength=1.8, columnspacing=1.3, labelspacing=0.45,
                 fontsize=8.0, borderaxespad=0.4,
                 frameon=True, framealpha=0.93, edgecolor=GRID)
 for txt in leg.get_texts():
-    if txt.get_text() in ("Diffusion LLMs", "Autoregressive / Seq2Seq"):
+    if txt.get_text() in (HEAD_D, HEAD_F):
         txt.set_fontweight("bold"); txt.set_color(INK)
 
 fig.tight_layout()
