@@ -35,8 +35,8 @@ CSV = os.path.join(REPO, "results", "unified_refineID", "em_by_cardinality.csv")
 
 # x buckets (must match analysis/em_by_cardinality.py BUCKETS)
 BIN_LABELS = ["|S|=1", "|S|=2", "|S|=3-5", "|S|=6-10", "|S|>=11"]
-PRETTY = {"|S|=1": "$|S|{=}1$", "|S|=2": "$|S|{=}2$", "|S|=3-5": "$|S|{=}3\\text{-}5$",
-          "|S|=6-10": "$|S|{=}6\\text{-}10$", "|S|>=11": "$|S|{\\geq}11$"}
+PRETTY = {"|S|=1": "1", "|S|=2": "2", "|S|=3-5": "3-5",
+          "|S|=6-10": "6-10", "|S|>=11": r"$\geq$11"}
 
 # The diffusion LLMs to draw as distinct lines, dark -> light (high EM -> low).
 DLLM_ORDER = ["DreamCoder-7B", "DiffuCoder-7B", "DiffusionGemma-26B-A4B", "DreamOn-7B"]
@@ -102,7 +102,7 @@ for (model, col, mk) in zip(present_dllm, oramp, DLLM_MARKERS):
 ax.set_xticks(x)
 ax.set_xticklabels([PRETTY[b] for b in BIN_LABELS])
 ax.set_xlim(-0.4, len(BIN_LABELS) - 0.6)
-ax.set_xlabel("Rename-set cardinality $|S|$ (number of masked sites)")
+ax.set_xlabel("Rename-set cardinality (number of masked sites)")
 ax.set_ylabel("All-sites Exact Match (%)")
 ax.set_ylim(0, 80)
 ax.set_yticks(np.arange(0, 81, 10))
