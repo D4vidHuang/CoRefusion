@@ -24,7 +24,8 @@ from scipy import stats
 
 BLUE, ORANGE, MUTED = "#0076C2", "#FF8000", "#5C6B78"
 INK, LINE, PANEL = "#14202B", "#D9E2EA", "#F2F6FA"
-plt.rcParams.update({"font.family": "DejaVu Sans", "text.color": INK, "axes.edgecolor": LINE})
+plt.rcParams.update({"font.family": "DejaVu Sans", "text.color": INK, "axes.edgecolor": LINE,
+                     "font.size": 13, "xtick.labelsize": 12.5, "ytick.labelsize": 12.5})
 
 HERE = os.path.dirname(__file__)
 ROOT = os.path.abspath(os.path.join(HERE, "..", ".."))
@@ -70,7 +71,7 @@ def panel(ax, xcol, xlabel, rho, r):
     hi = max(lb[xcol].max(), lb.LJ.max()) * 1.12
     ax.fill_between([lo, hi], [lo, hi], hi, color=PANEL, zorder=0)        # LJ > metric region
     ax.plot([lo, hi], [lo, hi], ls="--", color=MUTED, lw=1.2, zorder=1)
-    ax.text(hi * 0.82, hi * 0.9, "LJ = x", color=MUTED, fontsize=9, rotation=45, ha="center", va="center")
+    ax.text(hi * 0.82, hi * 0.9, "LJ = x", color=MUTED, fontsize=12, rotation=45, ha="center", va="center")
     for fam, (col, mk) in FAM_STY.items():
         s = lb[lb.family == fam]
         ax.scatter(s[xcol], s.LJ, s=[sz(p) for p in s.params], c=col, marker=mk,
@@ -78,32 +79,37 @@ def panel(ax, xcol, xlabel, rho, r):
     # fitted trend (LJ ~ x)
     b, a = np.polyfit(lb[xcol], lb.LJ, 1)
     xs = np.array([lo, hi]); ax.plot(xs, a + b * xs, color=INK, lw=1.4, ls="-", alpha=0.65, zorder=3)
-    # label the dLLMs (the interesting ones)
+    # label the dLLMs (the interesting ones). DreamCoder & DiffuCoder sit almost
+    # on top of each other near the top -> stagger their labels so they don't collide.
+    dllm_off = {"DreamCoder-7B": (0.02, 0.065), "DiffuCoder-7B": (0.02, -0.085),
+                "DreamOn-7B": (0.025, 0.035)}
     for _, r0 in lb[lb.family == "dLLM"].iterrows():
-        ax.annotate(r0.model, (r0[xcol], r0.LJ), xytext=(r0[xcol] + hi * 0.02, r0.LJ + hi * 0.03),
-                    fontsize=8.4, color=INK, zorder=6,
+        dx, dy = dllm_off.get(r0.model, (0.02, 0.03))
+        ax.annotate(r0.model, (r0[xcol], r0.LJ),
+                    xytext=(r0[xcol] + hi * dx, r0.LJ + hi * dy),
+                    fontsize=11, color=INK, zorder=6, ha="left", va="center",
                     arrowprops=dict(arrowstyle="-", color=MUTED, lw=0.7, shrinkA=0, shrinkB=3))
     ax.set_xlim(lo, hi); ax.set_ylim(lo, hi)
-    ax.set_xlabel(xlabel, fontsize=11.5); ax.set_ylabel("LLM-judge  LJ (%)", fontsize=11.5)
+    ax.set_xlabel(xlabel, fontsize=14.5); ax.set_ylabel("LLM-judge  LJ (%)", fontsize=14.5)
     ax.grid(True, color=LINE, lw=0.7); ax.set_axisbelow(True)
     for sp in ["top", "right"]:
         ax.spines[sp].set_visible(False)
     ax.text(0.03, 0.97, f"Spearman ρ = {rho:.2f}\nPearson r = {r:.2f}", transform=ax.transAxes,
-            ha="left", va="top", fontsize=10, color=INK,
+            ha="left", va="top", fontsize=13, color=INK,
             bbox=dict(boxstyle="round", fc="white", ec=LINE))
 
 fig, (axL, axR) = plt.subplots(1, 2, figsize=(13.5, 6.4))
 panel(axL, "EM", "Exact Match  EM (%)", rho_em, r_em)
 panel(axR, "CIS", "CoReFusion Identifier Score  CIS (%)", rho_cis, r_cis)
-axL.set_title("OLD: LJ vs Exact Match", fontsize=12.5, fontweight="bold")
-axR.set_title("NEW: LJ vs fused CIS", fontsize=12.5, fontweight="bold")
-axL.legend(loc="lower right", frameon=True, fontsize=8.6, facecolor="white", edgecolor=LINE,
-           title="Architecture")
+axL.set_title("OLD: LJ vs Exact Match", fontsize=15, fontweight="bold")
+axR.set_title("NEW: LJ vs fused CIS", fontsize=15, fontweight="bold")
+axL.legend(loc="lower right", frameon=True, fontsize=11.5, facecolor="white", edgecolor=LINE,
+           title="Architecture", title_fontsize=12.5)
 fig.suptitle("Benchmark landscape (RQ1): the fused CIS is a far tighter proxy for the expensive LLM-judge than EM",
-             fontsize=13.5, fontweight="bold", y=1.02)
+             fontsize=15.5, fontweight="bold", y=1.02)
 fig.text(0.5, -0.02, "marker size ∝ parameters · grey band = region where LJ accepts more than the metric credits · "
          "all three metrics from the same predictions (strict all-sites, gated)",
-         ha="center", fontsize=8.6, color=MUTED, style="italic")
+         ha="center", fontsize=10.5, color=MUTED, style="italic")
 fig.tight_layout()
 fig.savefig(os.path.join(HERE, "benchmark_cis_scatter.png"), dpi=200, facecolor="white", bbox_inches="tight")
 fig.savefig(os.path.join(HERE, "benchmark_cis_scatter.pdf"), facecolor="white", bbox_inches="tight")
@@ -111,10 +117,12 @@ plt.close(fig)
 
 # ---- ranking bump chart: EM -> CIS -> LJ ----
 order_lj = lb.sort_values("LJ", ascending=False).model.tolist()
+# method="first" breaks ties into UNIQUE ranks 1..N so two tied models never
+# land on the same y (which is what made the row labels overlap).
 rk = pd.DataFrame({
-    "EM": lb.set_index("model").EM.rank(ascending=False),
-    "CIS": lb.set_index("model").CIS.rank(ascending=False),
-    "LJ": lb.set_index("model").LJ.rank(ascending=False)})
+    "EM": lb.set_index("model").EM.rank(ascending=False, method="first"),
+    "CIS": lb.set_index("model").CIS.rank(ascending=False, method="first"),
+    "LJ": lb.set_index("model").LJ.rank(ascending=False, method="first")})
 cols3 = ["EM", "CIS", "LJ"]
 fig2, ax = plt.subplots(figsize=(8.6, 9))
 for m in order_lj:

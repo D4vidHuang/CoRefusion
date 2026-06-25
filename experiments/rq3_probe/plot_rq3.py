@@ -83,13 +83,18 @@ def fig1(out_dir, fig_dir, cap_n):
     axL.axvspan(L - third, L - 1, color="#f1c40f", alpha=0.10, lw=0)
     axL.axvline(chosen, color="#e74c3c", lw=0.6, alpha=0.6)
     axL.annotate("chosen L=%d\ncontextual AUC=%.2f" % (chosen, d["contextual_at_chosen"]),
-                 xy=(chosen, contextual[chosen]), xytext=(max(0, chosen - 11), 0.78),
-                 fontsize=6.5, arrowprops=dict(arrowstyle="->", lw=0.5))
+                 xy=(chosen, contextual[chosen]), xytext=(max(0, chosen - 16), 0.63),
+                 fontsize=6.5, va="center", ha="left",
+                 arrowprops=dict(arrowstyle="->", lw=0.5))
     axL.set_xlabel("Transformer layer (depth)")
     axL.set_ylabel("ROC-AUC  (good vs length-matched misplaced name)")
     axL.set_ylim(0.45, 1.0)
     axL.set_title("(a) Name-fit decodability vs depth")
-    axL.legend(loc="lower left", frameon=False, ncol=1)
+    # legend BELOW the panel so it never sits on the curves; annotation takes the
+    # now-free mid band.
+    axL.legend(loc="upper center", bbox_to_anchor=(0.5, -0.30), ncol=2,
+               frameon=False, fontsize=6.0, columnspacing=1.3, handlelength=1.5,
+               labelspacing=0.3)
 
     # RIGHT: 1D probe-projection histogram (REPLACES UMAP)
     sc = np.array(d["hist"]["scores"]); lab = np.array(d["hist"]["labels"])
@@ -100,8 +105,12 @@ def fig1(out_dir, fig_dir, cap_n):
     axR.axvline(0.0, color="k", lw=0.6, ls="--", alpha=0.7)
     axR.set_xlabel("probe-weight projection  w.h  (signed distance to boundary)")
     axR.set_ylabel("count")
+    axR.set_ylim(0, axR.get_ylim()[1] * 1.28)   # headroom so the legend clears the bars
     axR.set_title("(b) Layer %d separation (AUC=%.2f)" % (chosen, auc))
-    axR.legend(loc="upper right", frameon=False)
+    # the two histograms peak left (bad) and right (good); the centre top is the
+    # empty valley between them -> drop the legend there so it clears the bars.
+    axR.legend(loc="upper center", frameon=True, framealpha=0.9, edgecolor="#D9E2EA",
+               fontsize=6.5, borderpad=0.4, labelspacing=0.3, handlelength=1.4)
 
     fig.suptitle("RQ3 Exp1 — DiffuCoder-7B-Base, %s" % cap_n, fontsize=7.5, y=1.02)
     save(fig, fig_dir, "fig_rq3_exp1_depth_probe")

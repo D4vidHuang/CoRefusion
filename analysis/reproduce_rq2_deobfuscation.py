@@ -320,7 +320,7 @@ def make_figure(table5, fig8b, models):
         ax2.bar_label(bars, fmt="%.1f", padding=2, fontsize=7.5)
     ax2.set_xticks(x2)
     ax2.set_xticklabels(labels)
-    ax2.set_xlabel("Number of distinct identifiers in S")
+    ax2.set_xlabel("Number of distinct identifiers")
     ax2.set_ylabel("Mean per-sample EM (%)")
     ax2.set_title("(b) All-masked EM by identifier count")
     ax2.legend(fontsize=8.5)
