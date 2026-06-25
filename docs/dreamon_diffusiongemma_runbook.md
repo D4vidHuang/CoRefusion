@@ -23,7 +23,24 @@ DreamOn-7B 是 variable-canvas，三个实验全跑。
 
 ---
 
-## 1. 把最新代码同步到 DAIC（raw 拉取，DAIC 无 git）
+## 1. 把最新代码同步到服务器
+
+### 1a. 能用 git 的机器（DelftBlue / 本地）—— 直接 git 下载全部
+仓库公开，无需 token。
+```bash
+# umbrella 是 DAIC/DelftBlue 共享挂载，最新代码已在那里 —— 最简单是直接 pull：
+cd /tudelft.net/staff-umbrella/CoReFusion/CoRefusion && git pull origin main
+
+# 或下一份 DelftBlue 本地副本（job I/O 更快，建议放 scratch）：
+git clone https://github.com/D4vidHuang/CoRefusion.git /scratch/$USER/CoRefusion
+# 之后更新：
+bash server/clone_or_update.sh /scratch/$USER/CoRefusion       # clone 不存在则 clone，存在则 pull
+```
+> ⚠️ DelftBlue ≠ DAIC：作业脚本里 `source .../env_daic.sh` 和 SBATCH 头
+> (`--account` / `--partition` / `--gres=gpu:`) 是 DAIC 的，DelftBlue 上要换成你的
+> account + GPU 分区，并用 DelftBlue 的 module/venv（见 §2 注）。
+
+### 1b. 不能用 git 的机器（如 DAIC 计算节点）—— raw 拉取
 
 本次改动的文件：
 - `experiments/experiment_deobfuscation_refineID.py`（RQ2 加 DreamOn 引擎）
