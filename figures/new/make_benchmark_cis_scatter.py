@@ -24,8 +24,12 @@ from scipy import stats
 
 BLUE, ORANGE, MUTED = "#0076C2", "#FF8000", "#5C6B78"
 INK, LINE, PANEL = "#14202B", "#D9E2EA", "#F2F6FA"
+# Authored at the paper's DISPLAY size (figure* = \textwidth ≈ 7.16 in) with
+# body-matched fonts (IEEEtran 10 pt body; figures ~9 pt = 1 pt under body) so
+# that after \includegraphics[width=\textwidth] the in-figure text == paper text.
 plt.rcParams.update({"font.family": "DejaVu Sans", "text.color": INK, "axes.edgecolor": LINE,
-                     "font.size": 13, "xtick.labelsize": 12.5, "ytick.labelsize": 12.5})
+                     "font.size": 9, "axes.titlesize": 10, "axes.labelsize": 9.5,
+                     "xtick.labelsize": 8, "ytick.labelsize": 8, "legend.fontsize": 8})
 
 HERE = os.path.dirname(__file__)
 ROOT = os.path.abspath(os.path.join(HERE, "..", ".."))
@@ -64,14 +68,14 @@ r_cis = stats.pearsonr(lb.CIS, lb.LJ)[0]
 print(lb.round(1).to_string(index=False))
 print(f"\nSpearman(.,LJ): EM={rho_em:.3f} CIS={rho_cis:.3f} | Pearson: EM={r_em:.3f} CIS={r_cis:.3f}")
 
-sz = lambda p: 60 + 90 * np.sqrt(p)
+sz = lambda p: 26 + 42 * np.sqrt(p)   # marker area, tuned for the 7.16-in figure*
 
 def panel(ax, xcol, xlabel, rho, r):
     lo = 0
     hi = max(lb[xcol].max(), lb.LJ.max()) * 1.12
     ax.fill_between([lo, hi], [lo, hi], hi, color=PANEL, zorder=0)        # LJ > metric region
     ax.plot([lo, hi], [lo, hi], ls="--", color=MUTED, lw=1.2, zorder=1)
-    ax.text(hi * 0.82, hi * 0.9, "LJ = x", color=MUTED, fontsize=12, rotation=45, ha="center", va="center")
+    ax.text(hi * 0.82, hi * 0.9, "LJ = x", color=MUTED, fontsize=8, rotation=45, ha="center", va="center")
     for fam, (col, mk) in FAM_STY.items():
         s = lb[lb.family == fam]
         ax.scatter(s[xcol], s.LJ, s=[sz(p) for p in s.params], c=col, marker=mk,
@@ -87,29 +91,29 @@ def panel(ax, xcol, xlabel, rho, r):
         dx, dy = dllm_off.get(r0.model, (0.02, 0.03))
         ax.annotate(r0.model, (r0[xcol], r0.LJ),
                     xytext=(r0[xcol] + hi * dx, r0.LJ + hi * dy),
-                    fontsize=11, color=INK, zorder=6, ha="left", va="center",
+                    fontsize=8, color=INK, zorder=6, ha="left", va="center",
                     arrowprops=dict(arrowstyle="-", color=MUTED, lw=0.7, shrinkA=0, shrinkB=3))
     ax.set_xlim(lo, hi); ax.set_ylim(lo, hi)
-    ax.set_xlabel(xlabel, fontsize=14.5); ax.set_ylabel("LLM-judge  LJ (%)", fontsize=14.5)
+    ax.set_xlabel(xlabel); ax.set_ylabel("LLM-judge  LJ (%)")
     ax.grid(True, color=LINE, lw=0.7); ax.set_axisbelow(True)
     for sp in ["top", "right"]:
         ax.spines[sp].set_visible(False)
     ax.text(0.03, 0.97, f"Spearman ρ = {rho:.2f}\nPearson r = {r:.2f}", transform=ax.transAxes,
-            ha="left", va="top", fontsize=13, color=INK,
+            ha="left", va="top", fontsize=8.5, color=INK,
             bbox=dict(boxstyle="round", fc="white", ec=LINE))
 
-fig, (axL, axR) = plt.subplots(1, 2, figsize=(13.5, 6.4))
+fig, (axL, axR) = plt.subplots(1, 2, figsize=(7.16, 3.7))
 panel(axL, "EM", "Exact Match  EM (%)", rho_em, r_em)
 panel(axR, "CIS", "CoReFusion Identifier Score  CIS (%)", rho_cis, r_cis)
-axL.set_title("OLD: LJ vs Exact Match", fontsize=15, fontweight="bold")
-axR.set_title("NEW: LJ vs fused CIS", fontsize=15, fontweight="bold")
-axL.legend(loc="lower right", frameon=True, fontsize=11.5, facecolor="white", edgecolor=LINE,
-           title="Architecture", title_fontsize=12.5)
-fig.suptitle("Benchmark landscape (RQ1): the fused CIS is a far tighter proxy for the expensive LLM-judge than EM",
-             fontsize=15.5, fontweight="bold", y=1.02)
-fig.text(0.5, -0.02, "marker size ∝ parameters · grey band = region where LJ accepts more than the metric credits · "
+axL.set_title("OLD: LJ vs Exact Match", fontweight="bold")
+axR.set_title("NEW: LJ vs fused CIS", fontweight="bold")
+axL.legend(loc="lower right", frameon=True, fontsize=7.5, facecolor="white", edgecolor=LINE,
+           title="Architecture", title_fontsize=8)
+fig.suptitle("Benchmark (RQ1): the fused CIS is a far tighter proxy for the LLM-judge than EM",
+             fontsize=9.5, fontweight="bold", y=1.01)
+fig.text(0.5, -0.015, "marker size ∝ parameters · grey band = region where LJ accepts more than the metric credits · "
          "all three metrics from the same predictions (strict all-sites, gated)",
-         ha="center", fontsize=10.5, color=MUTED, style="italic")
+         ha="center", fontsize=7.5, color=MUTED, style="italic")
 fig.tight_layout()
 fig.savefig(os.path.join(HERE, "benchmark_cis_scatter.png"), dpi=200, facecolor="white", bbox_inches="tight")
 fig.savefig(os.path.join(HERE, "benchmark_cis_scatter.pdf"), facecolor="white", bbox_inches="tight")
