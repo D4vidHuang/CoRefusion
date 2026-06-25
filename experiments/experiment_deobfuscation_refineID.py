@@ -585,6 +585,24 @@ def upload_to_hf(file_path, repo_id, token, path_in_repo=None):
         return False
 
 
+def save_deobf_results(results, out_file):
+    """Write all per-sample rows to out_file (union of keys). Called every ~100
+    samples as a checkpoint AND at the end, so a 24h timeout keeps partial work."""
+    if not results:
+        return
+    all_keys = set()
+    for r in results:
+        all_keys.update(r.keys())
+    all_keys = sorted(all_keys)
+    tmp = out_file + ".tmp"
+    with open(tmp, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=all_keys)
+        writer.writeheader()
+        for r in results:
+            writer.writerow({k: r.get(k, "") for k in all_keys})
+    os.replace(tmp, out_file)   # atomic: never leave a half-written CSV
+
+
 # ---- Main Experiment --------------------------------------------------------
 
 def run_experiment(target_models=None, max_samples=None, hf_repo=None, hf_token=None,
@@ -649,11 +667,23 @@ def run_experiment(target_models=None, max_samples=None, hf_repo=None, hf_token=
         total_id_count = 0
         skipped = 0
         errors = 0
+        out_file = os.path.join(RESULTS_DIR, f"{model_name}_{mode}_{timestamp}.csv")
 
-        for row in tqdm(data, desc=f"  {model_name}"):
+        n_seen = 0
+        for row in tqdm(data, desc=f"  {model_name}", ncols=90, mininterval=10.0):
             item_id = row["id"]
             masked_code_raw = row["masked_code"]
             target = row["target"]
+
+            # Flushed heartbeat to .out (DreamOn all-masked is slow; tqdm alone
+            # can be invisible under SLURM block-buffering -- run with python -u).
+            n_seen += 1
+            if n_seen == 1 or n_seen % 20 == 0:
+                em_now = (100.0 * total_id_correct / total_id_count) if total_id_count else 0.0
+                print(f"    [{model_name}/{mode}] {n_seen}/{len(data)}  "
+                      f"id-EM={em_now:.1f}%  skip={skipped} err={errors}", flush=True)
+            if n_seen % 100 == 0:          # checkpoint partial results (timeout-safe)
+                save_deobf_results(results, out_file)
 
             try:
                 # 1. Reconstruct original code
@@ -783,18 +813,8 @@ def run_experiment(target_models=None, max_samples=None, hf_repo=None, hf_token=
                 if errors <= 5:
                     print(f"    Error on {item_id}: {e}")
 
-        # ── Save results ────────────────────────────────────────────
-        out_file = os.path.join(RESULTS_DIR, f"{model_name}_{mode}_{timestamp}.csv")
-        if results:
-            all_keys = set()
-            for r in results:
-                all_keys.update(r.keys())
-            all_keys = sorted(all_keys)
-            with open(out_file, "w", newline="", encoding="utf-8") as f:
-                writer = csv.DictWriter(f, fieldnames=all_keys)
-                writer.writeheader()
-                for r in results:
-                    writer.writerow({k: r.get(k, "") for k in all_keys})
+        # ── Save results (final write; checkpoints happened every 100) ──
+        save_deobf_results(results, out_file)
 
         overall_em = total_id_correct / total_id_count if total_id_count else 0
         processed = len(data) - skipped - errors
