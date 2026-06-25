@@ -102,7 +102,7 @@ for (model, col, mk) in zip(present_dllm, oramp, DLLM_MARKERS):
 ax.set_xticks(x)
 ax.set_xticklabels([PRETTY[b] for b in BIN_LABELS])
 ax.set_xlim(-0.4, len(BIN_LABELS) - 0.6)
-ax.set_xlabel("Rename-set cardinality (number of masked sites)")
+ax.set_xlabel("Number of masked sites")
 ax.set_ylabel("All-sites Exact Match (%)")
 ax.set_ylim(0, 80)
 ax.set_yticks(np.arange(0, 81, 10))
