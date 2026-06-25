@@ -32,9 +32,11 @@ SUMMARY_GLOB = os.path.join(REPO, "results", "diffusion_steps_benchmark", "summa
 
 CYAN = "#00A6D6"
 COLOR = {"DiffuCoder-7B": BLUE, "DiffuCoder-7B-Base": BLUE,
-         "DreamCoder-7B": ORANGE, "DreamCoder-7B-Base": ORANGE}
-LABEL = {"DiffuCoder-7B": "DiffuCoder-7B-Base", "DreamCoder-7B": "DreamCoder-7B"}
-ORDER = ["DiffuCoder-7B", "DiffuCoder-7B-Base", "DreamCoder-7B"]
+         "DreamCoder-7B": ORANGE, "DreamCoder-7B-Base": ORANGE,
+         "DiffusionGemma-26B-A4B": CYAN}
+LABEL = {"DiffuCoder-7B": "DiffuCoder-7B-Base", "DreamCoder-7B": "DreamCoder-7B",
+         "DiffusionGemma-26B-A4B": "DiffusionGemma-26B (no early stop)"}
+ORDER = ["DiffuCoder-7B", "DiffuCoder-7B-Base", "DreamCoder-7B", "DiffusionGemma-26B-A4B"]
 
 # ── published DiffuCoder-7B-Base curve (fallback / authoritative) ────────────
 PUBLISHED = {"DiffuCoder-7B-Base": {
@@ -45,12 +47,13 @@ PUBLISHED = {"DiffuCoder-7B-Base": {
 
 
 def load_series():
-    """model -> {steps, em(%), time(s)} from the newest summary CSV (+ published)."""
+    """model -> {steps, em(%), time(s)}, merged across ALL summary CSVs (newest
+    file wins per model; covers separate DiffuCoder/DreamCoder and DiffusionGemma
+    runs). summary_dgemma_*.csv also matches the glob."""
     series = {}
-    files = sorted(glob.glob(SUMMARY_GLOB))
-    if files:
+    for fpath in sorted(glob.glob(SUMMARY_GLOB)):   # oldest -> newest by name
         by = {}
-        for r in csv.DictReader(open(files[-1], encoding="utf-8")):
+        for r in csv.DictReader(open(fpath, encoding="utf-8")):
             m = r["model"]
             by.setdefault(m, []).append((int(r["steps"]),
                                          float(r["exact_match_rate"]) * 100,
@@ -59,8 +62,9 @@ def load_series():
             rows.sort()
             series[m] = {"steps": [s for s, _, _ in rows],
                          "em": [e for _, e, _ in rows],
-                         "time": [t for _, _, t in rows]}
-        print(f"loaded {len(series)} model(s) from {os.path.basename(files[-1])}: {list(series)}")
+                         "time": [t for _, _, t in rows]}   # later file overrides
+    if series:
+        print(f"loaded {len(series)} model(s) from summary CSVs: {list(series)}")
     # ensure DiffuCoder is shown even if it was not re-run this round
     if not any("DiffuCoder" in m for m in series):
         series.update(PUBLISHED)
