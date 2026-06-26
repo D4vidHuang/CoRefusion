@@ -86,6 +86,16 @@ HF_ID = {
 # DiffusionGemma is intentionally absent (block-AR, RQ2 N/A).
 RQ1_CLEAN_EM = {"DiffuCoder-7B": 31.1, "DreamCoder-7B": 33.2, "DreamOn-7B": 15.2}
 
+# Partial-run fallback for DreamOn RQ2 target-position EM. Used ONLY when the
+# per-sample CSVs (DreamOn-7B_{all-masked,target-only}_*.csv) are not yet present
+# in DEOBF_DIR -- e.g. the DAIC job is still running / not downloaded. As soon as
+# those CSVs land, resolve_run() finds them, DreamOn is computed from real data,
+# and this dict is ignored. Numbers below are the running id-EM from the DAIC
+# console of the in-progress run (all-masked n~80, target-only n~320); they are
+# PRELIMINARY and flagged as such in the paper. Set to None to disable the
+# fallback entirely (then DreamOn simply won't appear until its CSVs exist).
+DREAMON_RQ2_PARTIAL = {"all-masked": 5.0, "target-only": 4.4}
+
 
 def resolve_run(model, mode):
     """Pinned path if given (and exists), else newest <model>_<mode>_*.csv."""
@@ -306,14 +316,19 @@ def make_figure(table5, fig8b, models):
     ax1.set_xticks(x)
     ax1.set_xticklabels(conds)
     ax1.set_ylabel("Target-position Exact Match (%)")
-    ax1.set_title("(a) Target-position EM")
+    ax1.set_title("(a)")
     ax1.legend(fontsize=8.5)
     ax1.set_ylim(0, amax * 1.25)
 
-    # (b) all-masked per-sample EM by #identifiers bucket
-    labels = [b["bucket"] for b in fig8b[models[0]]]
+    # (b) all-masked per-sample EM by #identifiers bucket.
+    # Only models with per-sample bucket data appear here (a partial-run model
+    # injected for panel (a) has no fig8b entry and is skipped).
+    models_b = [m for m in models if m in fig8b]
+    offs_b = (np.arange(len(models_b)) - (len(models_b) - 1) / 2) * w
+    labels = [b["bucket"] for b in fig8b[models_b[0]]]
     x2 = np.arange(len(labels))
-    for m, col, off in zip(models, colors, offs):
+    for m, off in zip(models_b, offs_b):
+        col = _FIG_COLORS.get(m, _FIG_FALLBACK[models.index(m) % len(_FIG_FALLBACK)])
         vals = [b["mean_em_pct"] for b in fig8b[m]]
         bars = ax2.bar(x2 + off, vals, w, label=m, color=col,
                        edgecolor="white", linewidth=0.6)
@@ -322,7 +337,7 @@ def make_figure(table5, fig8b, models):
     ax2.set_xticklabels(labels)
     ax2.set_xlabel("Number of distinct identifiers")
     ax2.set_ylabel("Mean per-sample EM (%)")
-    ax2.set_title("(b) All-masked EM by identifier count")
+    ax2.set_title("(b)")
     ax2.legend(fontsize=8.5)
 
     fig.tight_layout()
@@ -416,6 +431,22 @@ def main():
                "target_only_target_em", "target_only_correct", "target_only_scored"], table5_rows)
     bundle["table5"] = table5
 
+    # Inject the DreamOn partial-run fallback into Table V / Fig 8(a) when its real
+    # per-sample CSVs are absent. It carries no fig8b / secVC data, so it appears
+    # only in the target-EM table and Fig 8(a) -- panel (b) and the wrong-pred
+    # breakdown skip it (they need per-sample rows).
+    models_fig = list(models)
+    if "DreamOn-7B" not in models and DREAMON_RQ2_PARTIAL is not None:
+        table5["DreamOn-7B"] = {
+            "all-masked": round(DREAMON_RQ2_PARTIAL["all-masked"], 2),
+            "target-only": round(DREAMON_RQ2_PARTIAL["target-only"], 2),
+            "RQ1_clean": RQ1_CLEAN_EM.get("DreamOn-7B"), "partial": True,
+        }
+        models_fig.append("DreamOn-7B")
+        print("  [DreamOn-7B] no RQ2 CSVs found -> using PRELIMINARY fallback "
+              f"(all-masked={DREAMON_RQ2_PARTIAL['all-masked']}, "
+              f"target-only={DREAMON_RQ2_PARTIAL['target-only']}) for Table V / Fig 8(a)")
+
     # ---- Fig 8(b): stratified all-masked EM ----
     print("\n" + "=" * 72)
     print("FIG 8(b) -- all-masked mean per-sample EM (%) by #identifiers bucket")
@@ -477,13 +508,13 @@ def main():
         json.dump(bundle, f, indent=2)
 
     # ---- ready-to-paste LaTeX table body ----
-    tex_path = emit_latex_table(table5, models)
+    tex_path = emit_latex_table(table5, models_fig)
     print(f"\nLaTeX table body -> {os.path.relpath(tex_path, REPO)}")
 
     # ---- figure ----
     if not args.no_figure:
         print("\n" + "=" * 72)
-        res = make_figure(table5, fig8b, models)
+        res = make_figure(table5, fig8b, models_fig)
         if res:
             print(f"  wrote {res[0]}\n        {res[1]}")
 

@@ -108,7 +108,7 @@ axa.set_yticks(np.arange(0, 41, 10))
 axa.set_xlim(-0.6, len(K) - 0.4)
 axa.legend(loc="upper right", fontsize=8.5, borderaxespad=0.5, handlelength=1.3,
            ncol=1)
-axa.set_title("(a) EM vs. mask tokens per identifier", fontsize=11, pad=8)
+axa.set_title("(a)", fontsize=11, pad=8)
 # DiffusionGemma caveat
 axa.annotate("DiffusionGemma-26B: N/A (block-AR, no mask canvas)",
              xy=(0.015, 0.02), xycoords="axes fraction", ha="left", va="bottom",
@@ -125,12 +125,12 @@ for rect, v in zip(bc, LEN_PCT):
 
 axb.set_xticks(xb)
 axb.set_xticklabels(LEN_LABELS)
-axb.set_xlabel("GT identifier length (sub-word tokens)")
+axb.set_xlabel("Ground-truth identifier length (sub-word tokens)")
 axb.set_ylabel("% of samples")
 axb.set_ylim(0, 45)
 axb.set_yticks(np.arange(0, 46, 10))
 axb.set_xlim(-0.6, len(LEN_LABELS) - 0.4)
-axb.set_title("(b) GT identifier length distribution", fontsize=11, pad=8)
+axb.set_title("(b)", fontsize=11, pad=8)
 
 fig.tight_layout(w_pad=2.2)
 savefig(fig, "fig06_mask_count_ablation")

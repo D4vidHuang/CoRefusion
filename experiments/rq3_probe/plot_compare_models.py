@@ -72,7 +72,6 @@ def main():
     ax.axvspan(2 / 3, 1.0, color="#f1c40f", alpha=0.10, lw=0)
     ax.set_xlabel("relative network depth (layer / final layer)")
     ax.set_ylabel("contextual AUC (intact - scrambled)")
-    ax.set_title("RQ3: name-fit decodability across dLLMs")
     ax.legend(loc="upper left", frameon=False)
     if plotted == 0:
         print("[error] no curves to plot — extract+train at least one model first.")

@@ -76,7 +76,7 @@ axA.set_xticks([0.0, 0.2, 0.4, 0.6, 0.8])
 axA.margins(y=0.08)
 axA.legend(title="Confidence regime", title_fontsize=9,
            loc="upper left", frameon=False)
-axA.set_title("(a) Entropy vs masked-context fraction", fontsize=10, pad=8)
+axA.set_title("(a)", fontsize=10, pad=8)
 
 # ---- panel (b): Delta-H bars ---------------------------------------------------
 labels = [lab for _, lab, _ in REGIMES]
@@ -94,7 +94,7 @@ axB.set_xticks(xpos)
 axB.set_xticklabels(labels, rotation=12, ha="right")
 axB.set_ylabel(r"$\Delta H$  ($\alpha{=}%.1f$ $-$ $\alpha{=}0$)" % ALPHA_MAX)
 axB.set_ylim(0, max(vals) * 1.18)
-axB.set_title("(b) Entropy increase under masking", fontsize=10, pad=8)
+axB.set_title("(b)", fontsize=10, pad=8)
 
 savefig(fig, "fig09_context_sensitivity")
 print("Delta-H:", {k: round(v, 3) for k, v in deltaH.items()})

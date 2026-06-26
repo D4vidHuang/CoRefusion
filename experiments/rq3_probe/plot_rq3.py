@@ -89,7 +89,7 @@ def fig1(out_dir, fig_dir, cap_n):
     axL.set_xlabel("Transformer layer (depth)")
     axL.set_ylabel("ROC-AUC  (good vs length-matched misplaced name)")
     axL.set_ylim(0.45, 1.0)
-    axL.set_title("(a) Name-fit decodability vs depth")
+    axL.set_title("(a)")
     # legend BELOW the panel so it never sits on the curves; annotation takes the
     # now-free mid band.
     axL.legend(loc="upper center", bbox_to_anchor=(0.5, -0.30), ncol=2,
@@ -103,16 +103,15 @@ def fig1(out_dir, fig_dir, cap_n):
     axR.hist(sc[lab == 1], bins=bins, color="#3498db", alpha=0.6, label="good (developer name)")
     axR.hist(sc[lab == 0], bins=bins, color="#e74c3c", alpha=0.6, label="bad (misplaced name)")
     axR.axvline(0.0, color="k", lw=0.6, ls="--", alpha=0.7)
-    axR.set_xlabel("probe-weight projection  w.h  (signed distance to boundary)")
+    axR.set_xlabel(r"probe-weight projection  $w\!\cdot\!h$  (signed distance to boundary)")
     axR.set_ylabel("count")
     axR.set_ylim(0, axR.get_ylim()[1] * 1.28)   # headroom so the legend clears the bars
-    axR.set_title("(b) Layer %d separation (AUC=%.2f)" % (chosen, auc))
+    axR.set_title("(b)")
     # the two histograms peak left (bad) and right (good); the centre top is the
     # empty valley between them -> drop the legend there so it clears the bars.
     axR.legend(loc="upper center", frameon=True, framealpha=0.9, edgecolor="#D9E2EA",
                fontsize=6.5, borderpad=0.4, labelspacing=0.3, handlelength=1.4)
 
-    fig.suptitle("RQ3 Exp1 — DiffuCoder-7B-Base, %s" % cap_n, fontsize=7.5, y=1.02)
     save(fig, fig_dir, "fig_rq3_exp1_depth_probe")
 
 
@@ -175,7 +174,6 @@ def fig3(fig_dir, regime_csv, cap_n):
     ax.set_xlim(-0.20, 1.18)   # margin so the 10989 / right-side labels don't clip
     ax.set_xticks([0, 1]); ax.set_xticklabels(["good\n(developer)", "smell\n(injected)"])
     ax.set_ylabel("median rank in output distribution (log)")
-    ax.set_title("RQ3 — regime-dependent ranking; rare names invert")
     ax.legend(frameon=False, loc="upper center")
     save(fig, fig_dir, "fig_rq3_regime_inversion")
 
