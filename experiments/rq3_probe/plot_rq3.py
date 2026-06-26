@@ -70,10 +70,6 @@ def fig1(out_dir, fig_dir, cap_n):
     contextual = np.array(c["contextual_pkg"])
     axL.plot(xs, c["intact_pkg"], color="#999999", lw=0.9, ls="--", label="AUC intact")
     axL.plot(xs, c["scrambled_pkg"], color="#cccccc", lw=0.9, ls=":", label="AUC scrambled ctx")
-    lo = np.array(c["intact_pkg_lo"]); hi = np.array(c["intact_pkg_hi"])
-    finite = ~np.isnan(lo)
-    if finite.any():
-        axL.fill_between(xs[finite], lo[finite], hi[finite], color="#3498db", alpha=0.15, lw=0)
     axL.plot(xs, contextual, color="#e74c3c", lw=1.6, label="AUC contextual (intact-scrambled)")
     axL.axhline(0.5, color="k", lw=0.5, alpha=0.5)
     axL.plot(xs, c["control"], color="#7f8c8d", lw=0.7, alpha=0.7, label="random-label control")
