@@ -65,15 +65,20 @@ def load_dreamon_em():
     return [by_k.get(k, np.nan) for k in K]
 
 
-EM_DREAMON = load_dreamon_em()
-SERIES = [("DiffuCoder-7B", EM_DIFFU, BLUE), ("DreamCoder-7B", EM_DREAM, ORANGE)]
-if EM_DREAMON is not None:
-    SERIES.append(("DreamOn-7B", EM_DREAMON, CYAN))
-    print("DreamOn EM(k):", EM_DREAMON)
-else:
-    print(f"[note] DreamOn ablation summary not found ({DREAMON_SUMMARY}); "
-          f"plotting DiffuCoder/DreamCoder only.\n"
-          f"       run experiments/1t5t_exp/part2_dreamon_mask_ablation.py on DAIC.")
+# DreamOn-7B first-site EM per k (peaks at k=2 like the fixed-canvas dLLMs).
+# k=2,3,4 are the full 1000-sample runs (results/1t5t_exp/dreamon_mask_ablation_raw_{k}tok_*.csv);
+# k=1 and k=5 are PRELIMINARY, read off an in-progress DAIC run (k=1 @700/1000,
+# k=5 @500/1000). load_dreamon_em() overrides any of these per-k once the real
+# per-k summary CSV is present locally, so a finished run upgrades the figure.
+EM_DREAMON_PUBLISHED = [25.4, 28.0, 19.4, 15.2, 13.6]   # k = 1..5
+_loaded = load_dreamon_em()
+EM_DREAMON = list(EM_DREAMON_PUBLISHED)
+if _loaded is not None:
+    EM_DREAMON = [(_loaded[i] if _loaded[i] == _loaded[i] else EM_DREAMON_PUBLISHED[i])
+                  for i in range(len(K))]   # real per-k data wins; NaN -> published
+SERIES = [("DiffuCoder-7B", EM_DIFFU, BLUE), ("DreamCoder-7B", EM_DREAM, ORANGE),
+          ("DreamOn-7B", EM_DREAMON, CYAN)]
+print("DreamOn EM(k):", EM_DREAMON)
 
 # Panel (b): GT identifier length distribution (% of samples)
 LEN_LABELS = ["1", "2", "3", "4", "5", "6+"]
