@@ -54,7 +54,7 @@ def rank_of_all(logits, position):
     return ranks
 
 
-def run(model_name, max_samples, thresh_low, thresh_high):
+def run(model_name, max_samples, thresh_low, thresh_high, dict_path=None):
     os.makedirs(OUT_DIR, exist_ok=True)
     if model_name not in base.MODEL_REGISTRY:
         sys.exit(f"unknown model {model_name}; choices: {list(base.MODEL_REGISTRY)}")
@@ -63,7 +63,8 @@ def run(model_name, max_samples, thresh_low, thresh_high):
 
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     dump = os.path.join(OUT_DIR, f"{model_name}_{ts}_smelltokens.tsv")
-    ew = load_english_words()
+    ew = load_english_words(dict_path)
+    print(f"english word set: {len(ew)} words  (dict: {dict_path or '$UMBRELLA/words.txt or system/fallback'})")
     smell_ids = build_smell_token_ids(tokenizer, ew, dump_path=dump)
     smell_t = torch.tensor(sorted(smell_ids), dtype=torch.long, device=base.DEVICE)
     print(f"smell-token set: {len(smell_ids)} tokens  (audit -> {dump})")
@@ -134,5 +135,8 @@ if __name__ == "__main__":
     ap.add_argument("--max-samples", type=int, default=None)
     ap.add_argument("--thresh-low", type=int, default=base.THRESH_LOW_DEFAULT)
     ap.add_argument("--thresh-high", type=int, default=base.THRESH_HIGH_DEFAULT)
+    ap.add_argument("--dict", default=None,
+                    help="path to a word list (<=3-char words exempted from the "
+                         "smell rule); else $UMBRELLA/words.txt / system dict / fallback")
     a = ap.parse_args()
-    run(a.model, a.max_samples, a.thresh_low, a.thresh_high)
+    run(a.model, a.max_samples, a.thresh_low, a.thresh_high, a.dict)

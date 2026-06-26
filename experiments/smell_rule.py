@@ -56,12 +56,20 @@ _FALLBACK_WORDS = {
 }
 
 
-def load_english_words():
-    """Resolve an English word set: prefer a system dictionary (reproducible on
-    DAIC, which ships /usr/share/dict/words), else a compact fallback."""
-    for p in ("/usr/share/dict/words", "/usr/share/dict/american-english",
-              "/usr/share/dict/british-english"):
-        if os.path.exists(p):
+def load_english_words(dict_path=None):
+    """Resolve an English word set (<=3-char words) used to exempt real short
+    words from the smell rule. Search order: explicit --dict, $UMBRELLA/words.txt
+    (DAIC convention), system dictionaries, then a compact built-in fallback."""
+    candidates = []
+    if dict_path:
+        candidates.append(dict_path)
+    um = os.environ.get("UMBRELLA")
+    if um:
+        candidates.append(os.path.join(um, "words.txt"))
+    candidates += ["/usr/share/dict/words", "/usr/share/dict/american-english",
+                   "/usr/share/dict/british-english"]
+    for p in candidates:
+        if p and os.path.exists(p):
             try:
                 with open(p, encoding="utf-8", errors="ignore") as f:
                     return {w.strip().lower() for w in f
@@ -108,8 +116,13 @@ def build_smell_token_ids(tokenizer, english_words=None, dump_path=None):
     if english_words is None:
         english_words = load_english_words()
     vocab = tokenizer.get_vocab()            # surface(str) -> id
+    try:
+        from tqdm import tqdm
+        items = tqdm(vocab.items(), total=len(vocab), desc="scan vocab for smell tokens")
+    except Exception:
+        items = vocab.items()
     pairs = []
-    for tok_str, tid in vocab.items():
+    for tok_str, tid in items:
         surface = normalize_token_surface(tok_str)
         if is_smell_identifier(surface, english_words):
             pairs.append((int(tid), surface))
