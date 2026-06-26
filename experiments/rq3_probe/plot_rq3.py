@@ -77,8 +77,6 @@ def fig1(out_dir, fig_dir, cap_n):
     axL.plot(xs, contextual, color="#e74c3c", lw=1.6, label="AUC contextual (intact-scrambled)")
     axL.axhline(0.5, color="k", lw=0.5, alpha=0.5)
     axL.plot(xs, c["control"], color="#7f8c8d", lw=0.7, alpha=0.7, label="random-label control")
-    axL.axhline(d["length_baseline_auc"], color="#27ae60", lw=0.7, ls="-.",
-                alpha=0.8, label="sub-word-count baseline")
     third = max(1, L // 3)
     axL.axvspan(L - third, L - 1, color="#f1c40f", alpha=0.10, lw=0)
     axL.axvline(chosen, color="#e74c3c", lw=0.6, alpha=0.6)
