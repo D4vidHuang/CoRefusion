@@ -114,10 +114,6 @@ axa.set_xlim(-0.6, len(K) - 0.4)
 axa.legend(loc="upper right", fontsize=8.5, borderaxespad=0.5, handlelength=1.3,
            ncol=1)
 axa.set_title("(a)", fontsize=11, pad=8)
-# DiffusionGemma caveat
-axa.annotate("DiffusionGemma-26B: N/A (block-AR, no mask canvas)",
-             xy=(0.015, 0.02), xycoords="axes fraction", ha="left", va="bottom",
-             fontsize=6.8, style="italic", color=GRAY)
 
 # ── Panel (b): GT length distribution ───────────────────────────────────────
 xb = np.arange(len(LEN_LABELS))
