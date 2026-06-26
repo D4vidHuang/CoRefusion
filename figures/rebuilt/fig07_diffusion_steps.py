@@ -50,19 +50,21 @@ def load_series():
     """model -> {steps, em(%), time(s)}, merged across ALL summary CSVs (newest
     file wins per model; covers separate DiffuCoder/DreamCoder and DiffusionGemma
     runs). summary_dgemma_*.csv also matches the glob."""
-    series = {}
+    # Merge per (model, steps) ACROSS all summary CSVs so incremental single-step
+    # runs (e.g. a separate --steps 64 job) ADD to an earlier grid instead of
+    # replacing it. Later files win for a given (model, steps) pair.
+    merged = {}   # model -> {steps: (em%, time_s)}
     for fpath in sorted(glob.glob(SUMMARY_GLOB)):   # oldest -> newest by name
-        by = {}
         for r in csv.DictReader(open(fpath, encoding="utf-8")):
             m = r["model"]
-            by.setdefault(m, []).append((int(r["steps"]),
-                                         float(r["exact_match_rate"]) * 100,
-                                         float(r["mean_time_per_sample"])))
-        for m, rows in by.items():
-            rows.sort()
-            series[m] = {"steps": [s for s, _, _ in rows],
-                         "em": [e for _, e, _ in rows],
-                         "time": [t for _, _, t in rows]}   # later file overrides
+            merged.setdefault(m, {})[int(r["steps"])] = (
+                float(r["exact_match_rate"]) * 100, float(r["mean_time_per_sample"]))
+    series = {}
+    for m, d in merged.items():
+        steps = sorted(d)
+        series[m] = {"steps": steps,
+                     "em":   [d[s][0] for s in steps],
+                     "time": [d[s][1] for s in steps]}
     if series:
         print(f"loaded {len(series)} model(s) from summary CSVs: {list(series)}")
     # ensure DiffuCoder is shown even if it was not re-run this round
