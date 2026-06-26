@@ -79,12 +79,13 @@ HF_ID = {
     "DreamOn-7B": "Dream-org/DreamOn-v0-7B",
 }
 
-# RQ1 clean-context target-position EM (first-site EM), from the SEPARATE RQ1
-# benchmark, not the deobfuscation runs, so Fig 8(a) can show all three bars.
-# DiffuCoder/DreamCoder pinned to the thesis RQ1 table; DreamOn = its first-site
-# EM on the unified RQ1 predictions (analysis/em_by_cardinality.py family).
-# DiffusionGemma is intentionally absent (block-AR, RQ2 N/A).
-RQ1_CLEAN_EM = {"DiffuCoder-7B": 31.1, "DreamCoder-7B": 33.2, "DreamOn-7B": 15.2}
+# RQ1 clean-context EM (re-run 2026-06): the all-sites EM headline numbers, the
+# same values reported in the abstract / main benchmark. Shown as the clean-context
+# reference in Fig 8(a). NOTE: the RQ2 columns (all-masked / target-only) are
+# target-position EM, so the clean column is the all-sites EM and the two RQ2
+# columns are target-position EM -- the y-axis/caption say "Exact Match" and spell
+# this out. DiffusionGemma is intentionally absent (block-AR, RQ2 N/A).
+RQ1_CLEAN_EM = {"DiffuCoder-7B": 24.4, "DreamCoder-7B": 27.5, "DreamOn-7B": 8.7}
 
 # Partial-run fallback for DreamOn RQ2 target-position EM. Used ONLY when the
 # per-sample CSVs (DreamOn-7B_{all-masked,target-only}_*.csv) are not yet present
@@ -317,7 +318,7 @@ def make_figure(table5, fig8b, models):
         ax1.bar_label(bars, fmt="%.1f", padding=2, fontsize=8)
     ax1.set_xticks(x)
     ax1.set_xticklabels(conds)
-    ax1.set_ylabel("Target-position Exact Match (%)")
+    ax1.set_ylabel("Exact Match (%)")
     ax1.legend(fontsize=8.5)
     ax1.set_ylim(0, amax * 1.25)
 
