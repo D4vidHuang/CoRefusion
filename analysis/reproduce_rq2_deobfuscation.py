@@ -294,16 +294,18 @@ def make_figure(table5, fig8b, models):
         return None
 
     os.makedirs(FIG_DIR, exist_ok=True)
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11.5, 4.2))
+    # Single-panel figure: target-position EM only (the old panel (b),
+    # all-masked EM by identifier count, was dropped at the authors' request).
+    fig, ax1 = plt.subplots(1, 1, figsize=(5.4, 4.0))
 
     n = len(models)
     colors = [_FIG_COLORS.get(m, _FIG_FALLBACK[i % len(_FIG_FALLBACK)])
               for i, m in enumerate(models)]
 
-    # (a) grouped bars: 3 conditions x n models
+    # grouped bars: 3 conditions x n models
     conds = ["RQ1\nclean", "RQ2\nall-masked", "RQ2\ntarget-only"]
     x = np.arange(len(conds))
-    w = min(0.8 / n, 0.38)
+    w = min(0.8 / n, 0.28)
     offs = (np.arange(n) - (n - 1) / 2) * w
     amax = 0.0
     for m, col, off in zip(models, colors, offs):
@@ -316,29 +318,8 @@ def make_figure(table5, fig8b, models):
     ax1.set_xticks(x)
     ax1.set_xticklabels(conds)
     ax1.set_ylabel("Target-position Exact Match (%)")
-    ax1.set_title("(a)")
     ax1.legend(fontsize=8.5)
     ax1.set_ylim(0, amax * 1.25)
-
-    # (b) all-masked per-sample EM by #identifiers bucket.
-    # Only models with per-sample bucket data appear here (a partial-run model
-    # injected for panel (a) has no fig8b entry and is skipped).
-    models_b = [m for m in models if m in fig8b]
-    offs_b = (np.arange(len(models_b)) - (len(models_b) - 1) / 2) * w
-    labels = [b["bucket"] for b in fig8b[models_b[0]]]
-    x2 = np.arange(len(labels))
-    for m, off in zip(models_b, offs_b):
-        col = _FIG_COLORS.get(m, _FIG_FALLBACK[models.index(m) % len(_FIG_FALLBACK)])
-        vals = [b["mean_em_pct"] for b in fig8b[m]]
-        bars = ax2.bar(x2 + off, vals, w, label=m, color=col,
-                       edgecolor="white", linewidth=0.6)
-        ax2.bar_label(bars, fmt="%.1f", padding=2, fontsize=7.5)
-    ax2.set_xticks(x2)
-    ax2.set_xticklabels(labels)
-    ax2.set_xlabel("Number of distinct identifiers")
-    ax2.set_ylabel("Mean per-sample EM (%)")
-    ax2.set_title("(b)")
-    ax2.legend(fontsize=8.5)
 
     fig.tight_layout()
     png = os.path.join(FIG_DIR, "fig8_rq2_em_june.png")
