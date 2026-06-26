@@ -29,9 +29,19 @@ rsync -avz --progress \
   "$REMOTE_BASE/1t5t_exp/" "$LOCAL_BASE/1t5t_exp/"
 
 echo
-echo "==> 拉到的 DreamOn 文件："
+echo "==> (3) Fig 6 扩散步数扫描结果 (DiffuCoder / DreamCoder / DiffusionGemma)"
+mkdir -p "$LOCAL_BASE/diffusion_steps_benchmark"
+rsync -avz --progress \
+  --include='summary_*.csv' \
+  --include='*-A4B_*.csv' --include='DiffuCoder*.csv' --include='DreamCoder*.csv' \
+  --exclude='*' \
+  "$REMOTE_BASE/diffusion_steps_benchmark/" "$LOCAL_BASE/diffusion_steps_benchmark/"
+
+echo
+echo "==> 拉到的文件："
 ls -lt "$LOCAL_BASE/deobfuscation_refineID/"DreamOn-7B_*.csv 2>/dev/null | head
 ls -lt "$LOCAL_BASE/1t5t_exp/"dreamon_mask_ablation_*.csv 2>/dev/null | head
+ls -lt "$LOCAL_BASE/diffusion_steps_benchmark/"summary*.csv 2>/dev/null | head
 
 echo
 echo "==> 下一步：本地重算并重画（用仓库里的 figure venv）"
@@ -39,4 +49,6 @@ echo "    # Table 3 + Fig 7（DreamOn 一旦有 CSV 会自动替换掉占位的 
 echo "    ./.venv-fig/bin/python analysis/reproduce_rq2_deobfuscation.py"
 echo "    # Fig 5（fig06）会自动带上 DreamOn 的 k=1/k=5"
 echo "    ./.venv-fig/bin/python figures/rebuilt/fig06_mask_count_ablation.py"
+echo "    # Fig 6（fig07）会自动带上三个模型的扩散步数曲线"
+echo "    ./.venv-fig/bin/python figures/rebuilt/fig07_diffusion_steps.py"
 echo "    # 然后把生成的 pdf 复制进论文仓库 figures/（见 README / 上一步输出路径）"
